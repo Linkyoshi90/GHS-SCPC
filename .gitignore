@@ -1,0 +1,31 @@
+# Never commit or share anything from the game.
+# The files unpacked from your disc (the launcher writes them here), the Japanese voice pool and maps made from them
+game/
+game_jp/
+# Disc images
+*.iso
+*.ISO
+
+# The recompiler: tools\setup.ps1 clones it at a pinned commit and applies patches\ps2recomp-local.patch. Its build and the
+# code generated from the game's program (src\runner, vu\generated) are game-derived: never commit them.
+PS2Recomp/
+
+# recomp\: only the recompiler inputs (function addresses and names, no game code) belong in the repo. Everything else
+# here is made on your machine: the generated C++, build logs, memory cards (saves), logs, translated VU1 programs.
+recomp/*
+!recomp/ghs.toml
+!recomp/ghs_functions_code.csv
+
+# Launcher settings (music on/off, track)
+launcher.ini
+
+# Python
+__pycache__/
+*.pyc
+
+# Editors and OS
+.vs/
+.vscode/
+*.user
+Thumbs.db
+desktop.ini

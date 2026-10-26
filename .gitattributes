@@ -1,0 +1,5 @@
+# The PS2Recomp patch must stay byte-exact (git apply against the pinned upstream commit): no line-ending conversion.
+*.patch -text
+# Binaries
+*.exe binary
+*.ico binary
