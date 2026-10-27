@@ -26,7 +26,7 @@ foreach ($dir in $From) {
 }
 $recipes = Join-Path $root 'recomp\vu1_recipes.txt'
 $recipeHashes = @(Get-Content $recipes | Where-Object { $_ -match '^[0-9a-f]{16} ' } | ForEach-Object { $_.Substring(0, 16) })
-$missing = @($recipeHashes | Where-Object { -not (Test-Path (Join-Path $generated "vu1_$_.inc")) })
+$missing = @($recipeHashes | Where-Object { -not (Test-Path (Join-Path $generated "vu1_$_.cpp")) })
 if (-not $new -and -not $missing) { 'No new VU1 images.'; return }
 if ($new) { "new images: $($new -join ', ')" }
 if ($missing) { "$($missing.Count) VU1 images from recomp\vu1_recipes.txt to translate" }
@@ -44,18 +44,21 @@ $p = Start-Process -FilePath $exe -ArgumentList "`"$root\game\SLES_519.33`"" -Wo
 if (-not $p.WaitForExit(300000)) { Stop-Process -Id $p.Id -Force; 'regeneration timed out (see recomp\regen.err.log)'; return }
 Remove-Item Env:GHS_VU1REGEN_FROM, Env:GHS_VU1GEN, Env:GHS_VU1REGEN_RECIPES
 $want = @(@(Get-ChildItem $images -Filter '*.bin' | ForEach-Object BaseName) + $recipeHashes | Sort-Object -Unique).Count
-$got = @(Get-ChildItem $gen -Filter 'vu1_*.inc' | Where-Object { $_.Name -ne 'vu1_programs.inc' }).Count
+$got = @(Get-ChildItem $gen -Filter 'vu1_*.cpp' | Where-Object { $_.BaseName -match '^vu1_[0-9a-f]{16}$' }).Count   # not vu1_steps_<k>.cpp
 if ($got -lt $want) { "only $got of $want images regenerated (see recomp\regen.err.log); generated\ left unchanged"; return }
 $backup = Join-Path $root ('recomp\vu1gen_backup_' + (Get-Date -Format 'yyyyMMdd_HHmm'))
 if (Test-Path $generated) { Copy-Item $generated $backup -Recurse }
 New-Item -ItemType Directory -Force $generated | Out-Null
-Copy-Item "$gen\*.inc" $generated -Force
+Remove-Item "$generated\*" -Force   # older layouts (vu1_<hash>.inc) would linger next to the new files
+Copy-Item "$gen\*" $generated -Force
 # ps2_vu1_core.cpp includes generated\ via __has_include: the build doesn't track a folder that didn't exist before
 (Get-Item (Join-Path $root 'PS2Recomp\ps2xRuntime\src\lib\vu\ps2_vu1_core.cpp')).LastWriteTime = Get-Date
 "regenerated $got images (old files in $backup)"
 
 if ($NoBuild) { return }
 Push-Location (Join-Path $root 'PS2Recomp')
+# Each image is its own .cpp: configure so the project lists them (a re-glob during the build comes too late for it).
+& $cmake -S . -B out/build | Out-Null
 & $cmake --build out/build --config Release --target ps2EntryRunner --parallel *> (Join-Path $root 'recomp\runner-build.log')
 $code = $LASTEXITCODE
 Pop-Location
