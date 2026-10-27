@@ -35,7 +35,10 @@ static class Launcher
     static Label status;
     static BloodBar progress;
     static TextBox log;
-    static Button button, musicButton, nextButton, jpButton, updateButton;
+    static Button button, musicButton, nextButton, jpButton, updateButton, graphicsButton;
+    // Where the game draws (launcher.ini graphics=, tools\launch.ps1 reads it too): the GPU through D3D11 or Vulkan
+    // (GHS_GS_API=vulkan; only in a build made with the Vulkan SDK), or the CPU (GHS_GS_GPU=0).
+    static readonly string[][] Backends = { new[] { "d3d11", "Direct3D 11" }, new[] { "vulkan", "Vulkan" }, new[] { "cpu", "CPU (slow)" } };
     static StepCard[] steps;
     static Action buttonAction;
     static Process running; // the build, so closing the window can stop it
@@ -72,7 +75,7 @@ static class Launcher
             new StepCard("3", "Play", "Starts the game. In game: F2 settings, F5 cheats, F6 snapshot. " +
                          "Optional: \"Japanese voices...\" below adds the Japanese voice recordings (Japanese disc, Python 3 + numpy)."),
         };
-        var stepColumn = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(S(14), S(10), S(6), S(6)), BackColor = Back };
+        var stepColumn = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(S(14), S(10), S(6), S(6)), BackColor = Back };
         stepColumn.Controls.Add(new Label { Text = "HOW TO PLAY", ForeColor = Dim, Font = new Font("Segoe UI", 9, FontStyle.Bold), AutoSize = true, Margin = new Padding(S(2), 0, 0, S(6)) }, 0, 0);
         for (int i = 0; i < steps.Length; i++)
         {
@@ -82,6 +85,12 @@ static class Launcher
             stepColumn.RowStyles.Add(new RowStyle(SizeType.Percent, 33.3f));
         }
         stepColumn.RowStyles.Insert(0, new RowStyle(SizeType.AutoSize));
+        graphicsButton = MakeButton("", Ghost, false);
+        graphicsButton.Width = S(240);
+        graphicsButton.Click += delegate { NextGraphics(); };
+        stepColumn.Controls.Add(graphicsButton, 0, 4);
+        stepColumn.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        UpdateGraphicsButton();
 
         status = new Label { Dock = DockStyle.Top, Height = S(62), Font = new Font("Segoe UI", 10.5f), ForeColor = Ink, Padding = new Padding(0, S(4), 0, 0) };
         progress = new BloodBar { Dock = DockStyle.Top, Height = S(16), Visible = false };
@@ -111,6 +120,8 @@ static class Launcher
         var tips = new ToolTip();
         tips.SetToolTip(musicButton, "Background music from the game (needs the unpacked game files)");
         tips.SetToolTip(nextButton, "Play the next of the game's music tracks");
+        tips.SetToolTip(graphicsButton, "Where the game draws its graphics, from the next start: the graphics card through Direct3D 11 (default) " +
+                                        "or Vulkan, or the CPU (slow). Vulkan is offered when the game was built with the Vulkan SDK installed.");
         jpButton = MakeButton("Japanese voices...", Ghost, false);
         jpButton.Width = S(170);
         jpButton.Click += delegate { ChooseJapaneseIso(); };
@@ -172,6 +183,31 @@ static class Launcher
         nextButton.FlatAppearance.BorderColor = nextButton.Enabled ? Ghost : Color.FromArgb(60, 52, 70);
         musicButton.Text = !can ? "♪ Music (unpack first)" : Music.On ? "♪ Music: on" : "♪ Music: off";
         musicButton.Width = S(can ? 132 : 190);
+    }
+
+    // The saved backend, D3D11 when it is Vulkan but the build has no Vulkan kernels (gs_spirv: made by a build with the SDK).
+    static string GraphicsChoice()
+    {
+        string g = Settings.Get("graphics", "d3d11");
+        bool vulkan = File.Exists(Path.Combine(Root, @"PS2Recomp\out\build\ps2xRuntime\gs_spirv\gs_spirv.cpp"));
+        return Backends.Any(b => b[0] == g) && (g != "vulkan" || vulkan) ? g : "d3d11";
+    }
+
+    static void NextGraphics()
+    {
+        int i = Array.FindIndex(Backends, b => b[0] == GraphicsChoice());
+        string next = Backends[(i + 1) % Backends.Length][0];
+        Settings.Set("graphics", next);
+        if (GraphicsChoice() != next) // no Vulkan in this build: on to the CPU
+            Settings.Set("graphics", next = Backends[(i + 2) % Backends.Length][0]);
+        UpdateGraphicsButton();
+        Log("Graphics: " + Backends.First(b => b[0] == next)[1] + " (from the next start)");
+    }
+
+    static void UpdateGraphicsButton()
+    {
+        string g = GraphicsChoice();
+        graphicsButton.Text = "Graphics: " + Backends.First(b => b[0] == g)[1];
     }
 
     // Lit (and clickable) only while GitHub has a newer version.
@@ -393,6 +429,11 @@ static class Launcher
         var psi = new ProcessStartInfo("cmd.exe", "/c \"\"" + Runner + "\" \"" + Path.Combine(GameDir, Elf) + "\" >\"" + Path.Combine(recomp, "live.log") + "\" 2>\"" + Path.Combine(recomp, "live.err.log") + "\"\"")
         { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = GameDir };
         psi.EnvironmentVariables["GHS_MC_ROOT"] = Path.Combine(recomp, "memcards");
+        string graphics = GraphicsChoice();
+        psi.EnvironmentVariables.Remove("GHS_GS_API");
+        psi.EnvironmentVariables.Remove("GHS_GS_GPU");
+        if (graphics == "vulkan") psi.EnvironmentVariables["GHS_GS_API"] = "vulkan";
+        if (graphics == "cpu") psi.EnvironmentVariables["GHS_GS_GPU"] = "0";
         var p = Process.Start(psi);
         // cmd lives as long as the game, so an exit within a few seconds with an error means it did not start
         Task.Run(() => p.WaitForExit(5000)).ContinueWith(t => form.BeginInvoke((Action)delegate
@@ -881,6 +922,32 @@ class BloodBar : Control
     }
 }
 
+// launcher.ini: key=value lines (music, track, graphics); Set rewrites the file keeping the other keys.
+static class Settings
+{
+    static readonly string Ini = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "launcher.ini");
+
+    static List<string> Lines()
+    {
+        try { return File.ReadAllLines(Ini).ToList(); }
+        catch (IOException) { return new List<string>(); }
+        catch (UnauthorizedAccessException) { return new List<string>(); }
+    }
+
+    public static string Get(string key, string fallback)
+    {
+        string line = Lines().FirstOrDefault(l => l.StartsWith(key + "="));
+        return line == null ? fallback : line.Substring(key.Length + 1).Trim();
+    }
+
+    public static void Set(string key, string value)
+    {
+        var lines = Lines().Where(l => !l.StartsWith(key + "=")).ToList();
+        lines.Add(key + "=" + value);
+        try { File.WriteAllLines(Ini, lines); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+}
+
 // The game's music behind the launcher, from the unpacked game files: NGYSTM_U.BIN holds raw 16-bit PCM streams (start
 // sectors as u64 at EXE vaddr 0x342000, 6-byte format records at 0x340350; format 5 = stereo 48 kHz in 0x200-byte L/R
 // blocks). 964-968 are the looping music tracks (loop flag set), 986-988 longer pieces. On/off and the track are kept in
@@ -889,7 +956,6 @@ static class Music
 {
     static readonly int[] Tracks = { 964, 965, 966, 967, 968, 986, 987, 988 };
     static readonly string Root = AppDomain.CurrentDomain.BaseDirectory;
-    static readonly string Ini = Path.Combine(Root, "launcher.ini");
     static SoundPlayer player;
     static int track, generation;
     public static bool On = true;
@@ -899,15 +965,8 @@ static class Music
 
     static Music()
     {
-        try
-        {
-            foreach (string line in File.ReadAllLines(Ini))
-            {
-                if (line.StartsWith("music=")) On = line.Substring(6).Trim() != "0";
-                if (line.StartsWith("track=")) int.TryParse(line.Substring(6).Trim(), out track);
-            }
-        }
-        catch (IOException) { }
+        On = Settings.Get("music", "1") != "0";
+        int.TryParse(Settings.Get("track", "0"), out track);
         track = Math.Max(0, Math.Min(Tracks.Length - 1, track));
     }
 
@@ -950,7 +1009,8 @@ static class Music
 
     static void Save()
     {
-        try { File.WriteAllText(Ini, "music=" + (On ? 1 : 0) + "\r\ntrack=" + track + "\r\n"); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        Settings.Set("music", On ? "1" : "0");
+        Settings.Set("track", track.ToString());
     }
 
     static long Exe(long vaddr) { return vaddr - 0x100000 + 0x80; }

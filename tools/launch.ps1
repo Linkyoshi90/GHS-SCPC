@@ -8,13 +8,15 @@
 #   -Record      allow GS recordings: run tools\gs_record_now.ps1 while the glitch is on screen.
 #   -Cpu         GS on the CPU (GHS_GS_GPU=0); by default it runs on the GPU (D3D11 compute, docs\GS_GPU_BACKEND.md)
 #                at the render scale saved in F2 -> Resolution. -Scale N (1-4) overrides that scale (GHS_GS_SCALE=N).
+#   -Vulkan      GS on the GPU through Vulkan (GHS_GS_API=vulkan; a build made with the Vulkan SDK). Without -Cpu or
+#                -Vulkan the launcher's Graphics choice applies (launcher.ini graphics=d3d11|vulkan|cpu).
 #   -Online host:port -Room name   online two-player Hell's Roulette through tools\roulette_server.py (GHS_NET, GHS_ROOM);
 #                the first in the room plays blue, the second red. Both pick Hell's Roulette, two players, on the title screen.
 # Keys (defaults; change them in F2 -> Controls, F4): WASD run (hold C to walk, Left Ctrl to walk slowly), arrows = D-pad (slow walk, menus), X/Space cross, C/Esc circle, Z square, V triangle,
 #       Q/E L1/R1, Left/Right Shift L2/R2, Enter start, Tab select. F1 debugger, F2 settings, F3 fps number, F4 key bindings,
 #       F5 cheats, F11 full screen, Backspace (hold) fast-forward. Cheat item names: tools\setup.ps1 writes them (needs Python 3), or python tools\ghs_item_names.py.
 # Output: recomp\live.log (stdout), recomp\live.err.log (the [GHS-*] lines).
-param([switch]$Capture, [switch]$NoVu1Async, [switch]$NoGifAsync, [int]$Bands = 0, [switch]$TexCheck, [switch]$Pcm, [switch]$Record, [switch]$Cpu, [switch]$Gpu, [int]$Scale = 0, [string]$Online = '', [string]$Room = 'default')
+param([switch]$Capture, [switch]$NoVu1Async, [switch]$NoGifAsync, [int]$Bands = 0, [switch]$TexCheck, [switch]$Pcm, [switch]$Record, [switch]$Cpu, [switch]$Gpu, [switch]$Vulkan, [int]$Scale = 0, [string]$Online = '', [string]$Room = 'default')
 $root = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $root 'PS2Recomp\out\build\ps2xRuntime\Release\ps2EntryRunner.exe'
 if (-not (Test-Path $exe)) { throw "Runner not built: $exe" }
@@ -29,9 +31,14 @@ if ($Capture) { New-Item -ItemType Directory -Force (Join-Path $root 'recomp\vu1
 if ($NoVu1Async) { $env:GHS_VU1_ASYNC = '0' }
 if ($NoGifAsync) { $env:GHS_GIF_ASYNC = '0' }
 if ($Bands -gt 0) { $env:GHS_GS_BANDS = [string]$Bands }
-# These two are cleared when not given (the script runs in the caller's session, its variables would stay).
+# These are cleared when not given (the script runs in the caller's session, its variables would stay).
 # (-Gpu: the default, kept so older command lines work.)
-if ($Cpu) { $env:GHS_GS_GPU = '0' } else { Remove-Item Env:GHS_GS_GPU -ErrorAction SilentlyContinue }
+$ini = Join-Path $root 'launcher.ini'
+$graphics = if ($Cpu) { 'cpu' } elseif ($Vulkan) { 'vulkan' } elseif (Test-Path $ini) {
+    [string](Select-String -Path $ini -Pattern '^graphics=(.*)$' | ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() } | Select-Object -First 1)
+} else { '' }
+if ($graphics -eq 'cpu') { $env:GHS_GS_GPU = '0' } else { Remove-Item Env:GHS_GS_GPU -ErrorAction SilentlyContinue }
+if ($graphics -eq 'vulkan') { $env:GHS_GS_API = 'vulkan' } else { Remove-Item Env:GHS_GS_API -ErrorAction SilentlyContinue }
 if ($Scale -gt 0) { $env:GHS_GS_SCALE = [string]$Scale } else { Remove-Item Env:GHS_GS_SCALE -ErrorAction SilentlyContinue }
 if ($Online) { $env:GHS_NET = $Online; $env:GHS_ROOM = $Room } else { Remove-Item Env:GHS_NET -ErrorAction SilentlyContinue }
 if ($TexCheck) { $env:GHS_TEXCACHE_CHECK = '1' } # check every cached texel against VRAM ([GHS-TEXCACHE] lines), slower
