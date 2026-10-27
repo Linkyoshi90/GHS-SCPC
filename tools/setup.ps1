@@ -1,6 +1,8 @@
 # One-time build on a fresh clone (the launcher runs it; it also works by hand once game\ holds the disc files):
 # clones PS2Recomp at the pinned commit, applies patches\ps2recomp-local.patch, builds the recompiler, then
 # recompiles game\SLES_519.33, installs the generated code (tools\install_generated.ps1) and builds the runner.
+# After an update it runs again and only rebuilds what changed: a new patch updates just the files that differ, and
+# the game is recompiled only when the recompiler or its inputs are newer than the last recompile.
 # Needs git, Visual Studio 2026 with "Desktop development with C++", and internet (CMake downloads raylib, imgui, FFmpeg).
 # Native commands are checked through $LASTEXITCODE: with redirected output, PowerShell 5.1 turns their stderr into errors.
 $root = Split-Path -Parent $PSScriptRoot
@@ -18,12 +20,40 @@ $cmake = if (Test-Path $vswhere) {
 }
 if (-not $cmake) { throw 'Visual Studio with "Desktop development with C++" is missing. Install it from https://visualstudio.microsoft.com/ and try again.' }
 
+$patch = Join-Path $root 'patches\ps2recomp-local.patch'
+$applied = Join-Path $root 'recomp\ps2recomp-applied.patch' # the patch PS2Recomp holds now
 if (-not (Test-Path (Join-Path $ps2 '.git'))) {
     'Downloading PS2Recomp ...'
     git clone -q -c core.autocrlf=false https://github.com/ran-j/PS2Recomp.git $ps2
     if (-not $LASTEXITCODE) { git -C $ps2 -c advice.detachedHead=false checkout -q 2c5fbb9 }
-    if (-not $LASTEXITCODE) { git -C $ps2 apply --whitespace=nowarn (Join-Path $root 'patches\ps2recomp-local.patch') }
+    if (-not $LASTEXITCODE) { git -C $ps2 apply --whitespace=nowarn $patch }
     if ($LASTEXITCODE) { Remove-Item -Recurse -Force $ps2; throw 'Downloading or patching PS2Recomp failed (see above).' }
+    Copy-Item $patch $applied
+}
+elseif (-not (Test-Path $applied) -or (Get-FileHash $patch).Hash -ne (Get-FileHash $applied).Hash) {
+    # An updated patch: apply it to the pinned commit in a scratch worktree and copy over only the files that differ.
+    # Re-applying in place would rewrite every patched header, and with them recompile all ~35000 game files.
+    'Updating PS2Recomp to the new patch ...'
+    $tree = Join-Path $env:TEMP 'ghs_ps2recomp_patched'
+    Remove-Item -Recurse -Force $tree -ErrorAction SilentlyContinue
+    git -C $ps2 worktree prune
+    git -C $ps2 worktree add -q --detach $tree 2c5fbb9
+    if (-not $LASTEXITCODE) { git -C $tree apply --whitespace=nowarn $patch }
+    if ($LASTEXITCODE) { throw 'Applying the updated PS2Recomp patch failed (see above). Deleting the PS2Recomp folder rebuilds everything.' }
+    $paths = foreach ($p in @($patch, $applied) | Where-Object { Test-Path $_ }) {
+        Select-String -Path $p -Pattern '^diff --git a/(\S+) b/(\S+)' | ForEach-Object { $_.Matches[0].Groups[1].Value; $_.Matches[0].Groups[2].Value }
+    }
+    foreach ($rel in $paths | Sort-Object -Unique) {
+        $new = Join-Path $tree $rel
+        $cur = Join-Path $ps2 $rel
+        if (-not (Test-Path $new)) { if (Test-Path $cur) { Remove-Item -Force $cur; "  removed $rel" }; continue }
+        if ((Test-Path $cur) -and (Get-FileHash $new).Hash -eq (Get-FileHash $cur).Hash) { continue }
+        New-Item -ItemType Directory -Force (Split-Path $cur) | Out-Null
+        Copy-Item -Force $new $cur
+        "  updated $rel"
+    }
+    git -C $ps2 worktree remove --force $tree
+    Copy-Item -Force $patch $applied
 }
 
 if (-not (Test-Path (Join-Path $build 'CMakeCache.txt'))) {
@@ -35,13 +65,23 @@ if (-not (Test-Path (Join-Path $build 'CMakeCache.txt'))) {
 & $cmake --build $build --config Release --target ps2_recomp --parallel
 if ($LASTEXITCODE) { throw 'Building the recompiler failed (see above).' }
 
-'Recompiling the game (log: recomp\recomp.log) ...'
-Push-Location (Join-Path $root 'recomp')
-& (Join-Path $build 'ps2xRecomp\Release\ps2_recomp.exe') ghs.toml *> recomp.log
-$code = $LASTEXITCODE
-Pop-Location
-if ($code) { throw 'Recompiling failed: see recomp\recomp.log.' }
-& (Join-Path $PSScriptRoot 'install_generated.ps1')
+# A recompile rewrites all ~35000 generated files (a full rebuild), so only when the recompiler or its inputs changed.
+$recompiler = Join-Path $build 'ps2xRecomp\Release\ps2_recomp.exe'
+$lastRecompile = Join-Path $root 'recomp\output\register_functions.cpp'
+$inputs = @($recompiler) + (@('recomp\ghs.toml', 'recomp\ghs_functions_code.csv', 'game\SLES_519.33') | ForEach-Object { Join-Path $root $_ })
+if ((Test-Path $lastRecompile) -and -not (Get-Item $inputs | Where-Object { $_.LastWriteTime -gt (Get-Item $lastRecompile).LastWriteTime })) {
+    'The recompiled game code is up to date.'
+    & (Join-Path $PSScriptRoot 'install_overrides.ps1') | Out-Null
+}
+else {
+    'Recompiling the game (log: recomp\recomp.log) ...'
+    Push-Location (Join-Path $root 'recomp')
+    & $recompiler ghs.toml *> recomp.log
+    $code = $LASTEXITCODE
+    Pop-Location
+    if ($code) { throw 'Recompiling failed: see recomp\recomp.log.' }
+    & (Join-Path $PSScriptRoot 'install_generated.ps1')
+}
 # The cheat menu's item names (F5) from the game's text, when Python 3 is installed (optional: without it the lists
 # show numbers). Game text: game\ghs_items.txt stays local.
 if (-not (Test-Path (Join-Path $root 'game\ghs_items.txt'))) {

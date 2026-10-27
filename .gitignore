@@ -17,8 +17,9 @@ recomp/*
 !recomp/ghs_functions_code.csv
 !recomp/vu1_recipes.txt
 
-# Launcher settings (music on/off, track)
+# Launcher settings (music on/off, track); the launcher an update replaced (deleted on the next start)
 launcher.ini
+GHS-SCPC.old.exe
 
 # Python
 __pycache__/

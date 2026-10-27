@@ -2,6 +2,7 @@
 // (starts the runner itself, like tools\launch.ps1, so Play also works under Wine/Proton). Build it with the C# compiler that comes with Windows (.NET Framework 4, C# 5), from the repo root:
 //   C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /win32icon:ghs.ico /out:GHS-SCPC.exe tools\launcher.cs
 // (ghs.ico: the exe's icon; the window takes it from the exe.)
+// Updates: in a git clone it fetches on start and offers "Update" when origin/main has new commits (see Update()).
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -28,12 +29,13 @@ static class Launcher
     static readonly string Root = AppDomain.CurrentDomain.BaseDirectory;
     static readonly string GameDir = Path.Combine(Root, "game");
     static readonly string Runner = Path.Combine(Root, @"PS2Recomp\out\build\ps2xRuntime\Release\ps2EntryRunner.exe");
+    static readonly string Exe = Path.Combine(Root, "GHS-SCPC.exe"), OldExe = Path.Combine(Root, "GHS-SCPC.old.exe");
 
     static Form form;
     static Label status;
     static BloodBar progress;
     static TextBox log;
-    static Button button, musicButton, nextButton, jpButton;
+    static Button button, musicButton, nextButton, jpButton, updateButton;
     static StepCard[] steps;
     static Action buttonAction;
     static Process running; // the build, so closing the window can stop it
@@ -114,6 +116,10 @@ static class Launcher
         jpButton.Click += delegate { ChooseJapaneseIso(); };
         tips.SetToolTip(jpButton, "Optional: the Japanese voice recordings with the English game (F2 -> Japanese voices in game). " +
                                   "Needs the Japanese disc image, Python 3 and numpy.");
+        updateButton = MakeButton("Update", Bone, false);
+        updateButton.Visible = false;
+        updateButton.Click += delegate { Update(); };
+        tips.SetToolTip(updateButton, "Get the new version from GitHub (the log lists what changed) and rebuild what it needs");
         var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = S(64), ColumnCount = 5, RowCount = 1, Padding = new Padding(S(14), S(10), S(16), S(12)), BackColor = Card };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -123,6 +129,7 @@ static class Launcher
         bottom.Controls.Add(musicButton, 0, 0);
         bottom.Controls.Add(nextButton, 1, 0);
         bottom.Controls.Add(jpButton, 2, 0);
+        bottom.Controls.Add(updateButton, 3, 0);
         bottom.Controls.Add(button, 4, 0);
 
         form.Controls.Add(middle);
@@ -137,7 +144,7 @@ static class Launcher
             try { DwmSetWindowAttribute(form.Handle, 20, ref on, 4); } catch (DllNotFoundException) { } catch (EntryPointNotFoundException) { }
         };
         log.HandleCreated += delegate { try { SetWindowTheme(log.Handle, "DarkMode_Explorer", null); } catch (DllNotFoundException) { } catch (EntryPointNotFoundException) { } };
-        form.Shown += delegate { ShowState(); if (Music.On && Music.Available()) { Music.Start(); Log(Music.Describe()); } UpdateMusicButtons(); };
+        form.Shown += delegate { ShowState(); if (Music.On && Music.Available()) { Music.Start(); Log(Music.Describe()); } UpdateMusicButtons(); CheckForUpdates(); };
         Application.Run(form);
     }
 
@@ -296,6 +303,110 @@ static class Launcher
             if (!t.Result || p.ExitCode == 0) form.Close();
             else { Log("The game did not start (see recomp\\live.err.log)."); ShowState(); }
         }));
+    }
+
+    // Updates through git (the README's install is a clone; a ZIP download has no .git and no update check).
+    static void CheckForUpdates()
+    {
+        try { File.Delete(OldExe); } catch (IOException) { } catch (UnauthorizedAccessException) { } // the launcher an update replaced
+        if (!Directory.Exists(Path.Combine(Root, ".git"))) return;
+        Task.Run(() =>
+        {
+            string output;
+            if (Git("fetch -q origin", out output) != 0 || Git("log --format=%s HEAD..origin/main", out output) != 0) return (string)null;
+            return output;
+        }).ContinueWith(t => form.BeginInvoke((Action)delegate
+        {
+            if (string.IsNullOrEmpty(t.Result)) return;
+            string[] commits = t.Result.Split('\n');
+            Log("Update available (" + commits.Length + " change" + (commits.Length == 1 ? "" : "s") + "), press Update:");
+            foreach (string c in commits) Log("  - " + c.Trim());
+            updateButton.Visible = true;
+        }));
+    }
+
+    // Fast-forwards to origin/main, rebuilds what the changed files need (tools\setup.ps1 only redoes what changed) and
+    // restarts the launcher when the update replaced it.
+    static void Update()
+    {
+        if (running != null) return;
+        if (Process.GetProcessesByName("ps2EntryRunner").Length > 0) { Log("Close the game first, then press Update."); return; }
+        updateButton.Visible = false;
+        Busy("Updating ...");
+        Task.Run(() => PullUpdate()).ContinueWith(t => form.BeginInvoke((Action)delegate
+        {
+            if (t.Exception != null) { Log("The update failed: " + t.Exception.InnerException.Message); ShowState(); return; }
+            Action done = delegate
+            {
+                if (!t.Result.Contains("GHS-SCPC.exe")) { ShowState(); return; }
+                Log("Restarting the launcher ...");
+                Process.Start(Exe);
+                form.Close();
+            };
+            if (File.Exists(Runner) && t.Result.Any(NeedsBuild))
+            {
+                Busy("Updated. Rebuilding what changed (a few minutes; longer when the recompiler changed) ...");
+                RunScript("setup.ps1", code =>
+                {
+                    if (code == 0) done();
+                    else Offer("The rebuild did not finish (see the log).", "Build again", Build);
+                });
+            }
+            else { Log("Updated."); done(); }
+        }));
+    }
+
+    // The changed paths. Windows can rename the running exe but not overwrite it: when the update brings a new launcher,
+    // this one moves aside (deleted on the next start) and git writes the new one in its place.
+    static string[] PullUpdate()
+    {
+        string output;
+        if (Git("status --porcelain --untracked-files=no", out output) != 0 || output != "")
+            throw new InvalidOperationException("the port's files have local changes, update with git yourself:\n" + output);
+        Git("diff --name-only HEAD origin/main", out output);
+        string[] changed = output.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim()).ToArray();
+        bool self = changed.Contains("GHS-SCPC.exe");
+        if (self)
+        {
+            File.Delete(OldExe);
+            File.Move(Exe, OldExe);
+            Git("checkout -- GHS-SCPC.exe", out output); // the current version back in place, so the merge sees a clean tree
+        }
+        if (Git("merge --ff-only -q origin/main", out output) != 0)
+        {
+            if (self) { File.Delete(Exe); File.Move(OldExe, Exe); }
+            throw new InvalidOperationException(output);
+        }
+        return changed;
+    }
+
+    // What the built game depends on: the game fixes, the runtime patch, recompiler inputs and VU1 recipes, build scripts.
+    static bool NeedsBuild(string path)
+    {
+        return path.StartsWith("overrides/") || path.StartsWith("patches/") || path.StartsWith("recomp/") || (path.StartsWith("tools/") && path.EndsWith(".ps1"));
+    }
+
+    // git in the port's folder: the exit code (-1: git is missing) and its output (on failure with the error text).
+    static int Git(string arguments, out string output)
+    {
+        var psi = new ProcessStartInfo("git", arguments)
+        {
+            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Root,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        psi.EnvironmentVariables["GIT_TERMINAL_PROMPT"] = "0"; // never wait on a password prompt nobody sees
+        try
+        {
+            using (var p = Process.Start(psi))
+            {
+                var error = p.StandardError.ReadToEndAsync();
+                output = p.StandardOutput.ReadToEnd().Trim();
+                p.WaitForExit();
+                if (p.ExitCode != 0) output = (output + "\n" + error.Result).Trim();
+                return p.ExitCode;
+            }
+        }
+        catch (System.ComponentModel.Win32Exception) { output = ""; return -1; }
     }
 
     static string ScriptArgs(string script)

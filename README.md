@@ -48,7 +48,8 @@ Not affiliated with or endorsed by the game's publisher or rights holders. All t
 
 ## Installation and first start
 
-1. **Get the repository**: clone it (`git clone <this repository's URL>`) or download it as a ZIP and extract it.
+1. **Get the repository**: clone it (`git clone https://github.com/Linkyoshi90/GHS-SCPC.git`; the launcher then
+   finds updates by itself) or download it as a ZIP and extract it.
    Use a path without special characters, for example `C:\Games\GHS-SCPC`.
 2. **Start `GHS-SCPC.exe`** (the launcher) in that folder. Windows SmartScreen may warn about an unknown program:
    *More info → Run anyway* (or build the launcher yourself, see [For developers](#for-developers)).
@@ -142,13 +143,14 @@ Roulette for two players on the title screen. The first player in a room plays b
 
 ## Updating
 
-After pulling a new version (`git pull`, or a new ZIP extracted over the old folder, keeping `game\` and `recomp\`):
+If you cloned the repository, the launcher checks for a new version each time it starts. When there is one, the log
+lists what changed and an **Update** button appears: it downloads the new version, rebuilds only what changed
+(usually a few minutes) and restarts the launcher if needed. Your saves in `recomp\memcards` are kept. If you changed
+the port's files yourself, it leaves them alone and asks you to update with git.
 
-- If only `overrides\` or `tools\` changed: run `powershell -ExecutionPolicy Bypass -File tools\install_overrides.ps1`,
-  then rebuild with `tools\setup.ps1` (or delete `PS2Recomp\out\build\ps2xRuntime\Release\ps2EntryRunner.exe` and
-  start the launcher, which then offers *Build the game*).
-- If `patches\ps2recomp-local.patch` changed: delete the whole `PS2Recomp` folder and start the launcher; it builds
-  everything again (30-60 minutes). Your saves in `recomp\memcards` are kept.
+By hand: `git pull` (or extract a new ZIP over the old folder, keeping `game\` and `recomp\`), then run
+`powershell -ExecutionPolicy Bypass -File tools\setup.ps1`. It rebuilds only what changed. Deleting the `PS2Recomp`
+folder makes the next build start from scratch (30-60 minutes).
 
 ## Troubleshooting
 
