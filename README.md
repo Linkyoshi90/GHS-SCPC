@@ -193,6 +193,8 @@ Visual Studio.
   contains them (the generated game code is excluded automatically).
 - **Debug options** of `tools\launch.ps1`: `-Cpu` (graphics on the CPU), `-Scale N`, `-Pcm` (record sound), `-TexCheck`,
   `-Record` (GS recording with `tools\gs_record_now.ps1`), `-Capture` (record VU1 programs).
+- **Vulkan**: with the [Vulkan SDK](https://vulkan.lunarg.com/) installed, the build also compiles the GPU graphics for
+  Vulkan 1.2 (the path a Linux build will use); on Windows set `GHS_GS_API=vulkan` to run them instead of Direct3D 11.
 - Never commit anything from `game\`, `PS2Recomp\` or the generated parts of `recomp\` (the `.gitignore` keeps them out).
 
 ## Credits
