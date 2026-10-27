@@ -7,6 +7,8 @@ $root = Split-Path -Parent $PSScriptRoot
 $ps2 = Join-Path $root 'PS2Recomp'
 $build = Join-Path $ps2 'out\build'
 $exe = Join-Path $build 'ps2xRuntime\Release\ps2EntryRunner.exe'
+# PS2Recomp's default ON compiles log tracking into every game function: far slower, ~1 GB game\ps2_log.txt per session
+$options = '-DPS2X_ENABLE_AGRESSIVE_LOGS=OFF'
 
 if (-not (Test-Path (Join-Path $root 'game\SLES_519.33'))) { throw 'game\SLES_519.33 is missing: unpack the disc first (launcher).' }
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git is missing. Install it from https://git-scm.com/download/win and try again.' }
@@ -26,7 +28,7 @@ if (-not (Test-Path (Join-Path $ps2 '.git'))) {
 
 if (-not (Test-Path (Join-Path $build 'CMakeCache.txt'))) {
     'Configuring the build (downloads raylib, imgui and FFmpeg) ...'
-    & $cmake -S $ps2 -B $build
+    & $cmake -S $ps2 -B $build $options
     if ($LASTEXITCODE) { throw 'CMake configure failed (see above).' }
 }
 'Building the recompiler ...'
@@ -50,11 +52,15 @@ if (-not (Test-Path (Join-Path $root 'game\ghs_items.txt'))) {
     }
 }
 # Configure again so the project lists the ~35000 generated files: a re-glob during the build comes too late for that build.
-& $cmake -S $ps2 -B $build | Out-Null
+& $cmake -S $ps2 -B $build $options | Out-Null
 'Building the game (30-60 minutes; log: recomp\runner-build.log) ...'
 & $cmake --build $build --config Release --target ps2EntryRunner --parallel *> (Join-Path $root 'recomp\runner-build.log')
 if ($LASTEXITCODE -or -not (Test-Path $exe)) {
     Select-String -Path (Join-Path $root 'recomp\runner-build.log') -Pattern ': error|fatal error' | Select-Object -First 10 | ForEach-Object { $_.Line.Trim() }
     throw 'The game build failed: see recomp\runner-build.log.'
 }
+# The VU1 graphics programs in recomp\vu1_recipes.txt, built from game\SLES_519.33 and translated, so the first
+# session already runs at full speed (otherwise they run on the slow interpreter until the next Play).
+'Translating the graphics programs (a few minutes) ...'
+& (Join-Path $PSScriptRoot 'add_vu1_images.ps1')
 'Build finished.'

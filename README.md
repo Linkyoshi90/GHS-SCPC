@@ -59,9 +59,9 @@ Not affiliated with or endorsed by the game's publisher or rights holders. All t
    2. **Build the game**: starts by itself after unpacking. The log shows what happens: the recompiler is downloaded
       and patched, your game's program is recompiled to C++, and the port is compiled. **30 to 60 minutes, one time.**
    3. **Play**: press *Play*.
-4. **First session**: some of the game's graphics programs (VU1 microcode) still run on a slower interpreter. They are
-   saved while you play; the next time you press *Play*, the launcher translates them once (a few minutes), and the
-   game runs at full speed from then on. If it feels slow on your first start, that is expected.
+4. **New areas**: the build already translates the game's known graphics programs (VU1 microcode). Should the game
+   use one it doesn't know yet, that one runs on a slower interpreter; it is saved while you play, and the next time
+   you press *Play*, the launcher translates it once (a few minutes).
 
 The launcher can play background music from the game once the disc is unpacked (*Music* button, *Next track*).
 
@@ -158,7 +158,7 @@ After pulling a new version (`git pull`, or a new ZIP extracted over the old fol
 | "Not a DVD image with an ISO 9660 file system" | Use a plain `.iso` dump, not `.bin/.cue`, `.chd` or `.cso`. |
 | "Git is missing" / "Visual Studio ... is missing" | Install them (see [What you need](#what-you-need)), then press the button again. |
 | The build stops with an error | Read the last lines of the launcher's log and `recomp\runner-build.log`. Pressing the button again continues where it stopped. |
-| The game is slow on the first start | Expected: see step 4 of [Installation](#installation-and-first-start). |
+| The game is slow in one area | Press *Play* in the launcher next time: see step 4 of [Installation](#installation-and-first-start). |
 | The game does not start | Look at `recomp\live.err.log`. |
 | Something looks or behaves wrong | Press **F6** at that moment (saves a snapshot to `game\snapshots`) and open an issue with a description and `recomp\live.err.log`. Don't attach files from `game\`. |
 
@@ -168,7 +168,8 @@ Visual Studio.
 ## How it works
 
 1. **Recompiler inputs** (in this repo): the game's function list (`recomp\ghs_functions_code.csv`, addresses and
-   names found with Ghidra) and the recompiler settings (`recomp\ghs.toml`). No game code is stored here.
+   names found with Ghidra), the recompiler settings (`recomp\ghs.toml`) and where the VU1 programs lie in the game's
+   program (`recomp\vu1_recipes.txt`, offsets only). No game code is stored here.
 2. **PS2Recomp** ([ran-j/PS2Recomp](https://github.com/ran-j/PS2Recomp)) is cloned at a pinned commit and
    `patches\ps2recomp-local.patch` is applied: the runtime changes this port needs (graphics on the GPU, the VU1
    translator, audio, memory cards, controllers, the settings and cheat windows, and many fixes).
@@ -176,8 +177,10 @@ Visual Studio.
    copied into `PS2Recomp`), together with the files from `overrides\`: the port's game-specific fixes and features.
 4. Everything is compiled into `ps2EntryRunner.exe`, which runs the recompiled game and reads the rest of the game data
    (`FILE.STM`, sound, movies) from `game\` at run time.
-5. VU1 microcode the game uploads is translated to C++ the first time it is seen (`tools\add_vu1_images.ps1`, run by the
-   launcher), because it is game code and can't ship with the repo either.
+5. VU1 microcode is game code too, so it can't ship either: after the first build, the runner puts the known programs
+   together from **your** `game\SLES_519.33` (`recomp\vu1_recipes.txt`, checked against each program's hash) and
+   translates them to C++; any program not listed there is translated the first time the game uses it
+   (`tools\add_vu1_images.ps1`, run by the launcher).
 
 ## For developers
 

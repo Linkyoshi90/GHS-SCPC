@@ -15,6 +15,7 @@ PS2Recomp/
 recomp/*
 !recomp/ghs.toml
 !recomp/ghs_functions_code.csv
+!recomp/vu1_recipes.txt
 
 # Launcher settings (music on/off, track)
 launcher.ini
