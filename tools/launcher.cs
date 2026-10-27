@@ -67,7 +67,7 @@ static class Launcher
         {
             new StepCard("1", "Unpack your disc", "Choose the game's disc image (.iso, European release SLES-51933). " +
                          "The game files are copied into the game folder; your disc image stays untouched."),
-            new StepCard("2", "Build the game", "One time, 30-60 minutes. Needs Git, Visual Studio with \"Desktop development with C++\" " +
+            new StepCard("2", "Build the game", "One time, 30-60 minutes. Needs Git and the free Visual Studio C++ Build Tools (the button links them) " +
                          "and an internet connection. The log on the right shows the progress."),
             new StepCard("3", "Play", "Starts the game. In game: F2 settings, F5 cheats, F6 snapshot. " +
                          "Optional: \"Japanese voices...\" below adds the Japanese voice recordings (Japanese disc, Python 3 + numpy)."),
@@ -117,9 +117,10 @@ static class Launcher
         tips.SetToolTip(jpButton, "Optional: the Japanese voice recordings with the English game (F2 -> Japanese voices in game). " +
                                   "Needs the Japanese disc image, Python 3 and numpy.");
         updateButton = MakeButton("Update", Bone, false);
-        updateButton.Visible = false;
         updateButton.Click += delegate { Update(); };
-        tips.SetToolTip(updateButton, "Get the new version from GitHub (the log lists what changed) and rebuild what it needs");
+        ShowUpdate(false);
+        tips.SetToolTip(updateButton, "Lights up when GitHub has a new version (checked at start, in a git clone): " +
+                                      "gets it (the log lists what changed) and rebuilds what it needs");
         var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = S(64), ColumnCount = 5, RowCount = 1, Padding = new Padding(S(14), S(10), S(16), S(12)), BackColor = Card };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -145,6 +146,8 @@ static class Launcher
         };
         log.HandleCreated += delegate { try { SetWindowTheme(log.Handle, "DarkMode_Explorer", null); } catch (DllNotFoundException) { } catch (EntryPointNotFoundException) { } };
         form.Shown += delegate { ShowState(); if (Music.On && Music.Available()) { Music.Start(); Log(Music.Describe()); } UpdateMusicButtons(); CheckForUpdates(); };
+        // Back from the Git / C++ tools installers: check again (only while idle at the build step).
+        form.Activated += delegate { if (running == null && button.Enabled && steps[1].State == StepState.Current) ShowState(); };
         Application.Run(form);
     }
 
@@ -171,6 +174,13 @@ static class Launcher
         musicButton.Width = S(can ? 132 : 190);
     }
 
+    // Lit (and clickable) only while GitHub has a newer version.
+    static void ShowUpdate(bool available)
+    {
+        updateButton.Enabled = available;
+        updateButton.FlatAppearance.BorderColor = available ? Bone : Color.FromArgb(60, 52, 70);
+    }
+
     static void ShowState()
     {
         bool files = GameFilesOk(), built = files && File.Exists(Runner);
@@ -180,7 +190,17 @@ static class Launcher
         if (!files)
             Offer("Choose the game's disc image (.iso) to unpack the game files.\nOnly the European disc (SLES-51933) is supported so far.", "Choose disc image...", ChooseIso);
         else if (!built)
-            Offer("The game files are in place. Building the game takes 30-60 minutes (one time).", "Build the game", Build);
+        {
+            var missing = MissingTools();
+            if (missing.Count > 0)
+                Offer("Building needs " + string.Join(" and ", missing.Select(t => t[0])) + (missing.Count == 1 ? " (free)" : ", both free") +
+                      ". The button opens the download " + (missing.Count == 1 ? "page" : "pages") + "; install, then come back here." +
+                      (missing.Any(t => t[1] == "C++ tools") ? "\nIn the Build Tools installer, tick \"Desktop development with C++\"." : ""),
+                      "Get " + string.Join(" + ", missing.Select(t => t[1])),
+                      () => { foreach (var t in missing) Process.Start(t[2]); });
+            else
+                Offer("The game files are in place. Building the game takes 30-60 minutes (one time).", "Build the game", Build);
+        }
         else
             Offer("Ready. The hotel is waiting for you...", "Play", Play);
         jpButton.Enabled = files;
@@ -196,6 +216,42 @@ static class Launcher
         buttonAction = action;
         button.Enabled = true;
         progress.Visible = false;
+    }
+
+    // What building needs and isn't installed: {what, button word, download page}. Build Tools: the compiler without
+    // the Visual Studio editor (its "Desktop development with C++" includes the CMake tools setup.ps1 uses).
+    static List<string[]> MissingTools()
+    {
+        // An installer changes the system PATH, not this process's: read it again, so Git installed while the
+        // launcher was open is found, and setup.ps1 (started from here) finds it too.
+        Environment.SetEnvironmentVariable("PATH", Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) + ";" +
+                                                   Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User));
+        var missing = new List<string[]>();
+        bool git = Environment.GetEnvironmentVariable("PATH").Split(';').Any(dir =>
+        {
+            try { return dir.Trim().Length > 0 && File.Exists(Path.Combine(dir.Trim().Trim('"'), "git.exe")); }
+            catch (ArgumentException) { return false; } // a malformed PATH entry
+        });
+        if (!git)
+            missing.Add(new[] { "Git", "Git", "https://git-scm.com/download/win" });
+        if (!HasCppTools())
+            missing.Add(new[] { "the Visual Studio C++ Build Tools", "C++ tools",
+                                "https://visualstudio.microsoft.com/visual-cpp-build-tools/" });
+        return missing;
+    }
+
+    // The test setup.ps1 makes: a Visual Studio or Build Tools with the C++ compiler and its CMake.
+    static bool HasCppTools()
+    {
+        string vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Microsoft Visual Studio\Installer\vswhere.exe");
+        if (!File.Exists(vswhere))
+            return false;
+        var p = Process.Start(new ProcessStartInfo(vswhere, "-latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 " +
+                                                            "-find Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe")
+            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true });
+        string output = p.StandardOutput.ReadToEnd();
+        p.WaitForExit();
+        return output.Trim().Length > 0;
     }
 
     static bool GameFilesOk()
@@ -321,7 +377,7 @@ static class Launcher
             string[] commits = t.Result.Split('\n');
             Log("Update available (" + commits.Length + " change" + (commits.Length == 1 ? "" : "s") + "), press Update:");
             foreach (string c in commits) Log("  - " + c.Trim());
-            updateButton.Visible = true;
+            ShowUpdate(true);
         }));
     }
 
@@ -331,7 +387,7 @@ static class Launcher
     {
         if (running != null) return;
         if (Process.GetProcessesByName("ps2EntryRunner").Length > 0) { Log("Close the game first, then press Update."); return; }
-        updateButton.Visible = false;
+        ShowUpdate(false);
         Busy("Updating ...");
         Task.Run(() => PullUpdate()).ContinueWith(t => form.BeginInvoke((Action)delegate
         {
