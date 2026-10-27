@@ -67,7 +67,7 @@ static class Launcher
         {
             new StepCard("1", "Unpack your disc", "Choose the game's disc image (.iso, European release SLES-51933). " +
                          "The game files are copied into the game folder; your disc image stays untouched."),
-            new StepCard("2", "Build the game", "One time, 30-60 minutes. Needs Git and the free Visual Studio C++ Build Tools (the button links them) " +
+            new StepCard("2", "Build the game", "One time, 30-60 minutes. Needs Git and the free Visual Studio C++ Build Tools (the button installs them) " +
                          "and an internet connection. The log on the right shows the progress."),
             new StepCard("3", "Play", "Starts the game. In game: F2 settings, F5 cheats, F6 snapshot. " +
                          "Optional: \"Japanese voices...\" below adds the Japanese voice recordings (Japanese disc, Python 3 + numpy)."),
@@ -192,12 +192,15 @@ static class Launcher
         else if (!built)
         {
             var missing = MissingTools();
-            if (missing.Count > 0)
-                Offer("Building needs " + string.Join(" and ", missing.Select(t => t[0])) + (missing.Count == 1 ? " (free)" : ", both free") +
-                      ". The button opens the download " + (missing.Count == 1 ? "page" : "pages") + "; install, then come back here." +
+            string needs = "Building needs " + string.Join(" and ", missing.Select(t => t[0])) + (missing.Count == 1 ? " (free)" : ", both free") + ". ";
+            string names = string.Join(" + ", missing.Select(t => t[1]));
+            if (missing.Count > 0 && File.Exists(Winget))
+                Offer(needs + "The button installs " + (missing.Count == 1 ? "it" : "them") + " with Windows' package manager (winget); " +
+                      "it shows what it will do first.", "Install " + names, () => ConfirmInstall(missing));
+            else if (missing.Count > 0) // no winget (Wine, older Windows): the download pages
+                Offer(needs + "The button opens the download " + (missing.Count == 1 ? "page" : "pages") + "; install, then come back here." +
                       (missing.Any(t => t[1] == "C++ tools") ? "\nIn the Build Tools installer, tick \"Desktop development with C++\"." : ""),
-                      "Get " + string.Join(" + ", missing.Select(t => t[1])),
-                      () => { foreach (var t in missing) Process.Start(t[2]); });
+                      "Get " + names, () => { foreach (var t in missing) Process.Start(t[2]); });
             else
                 Offer("The game files are in place. Building the game takes 30-60 minutes (one time).", "Build the game", Build);
         }
@@ -218,8 +221,47 @@ static class Launcher
         progress.Visible = false;
     }
 
-    // What building needs and isn't installed: {what, button word, download page}. Build Tools: the compiler without
-    // the Visual Studio editor (its "Desktop development with C++" includes the CMake tools setup.ps1 uses).
+    static readonly string Winget = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\WindowsApps\winget.exe");
+
+    // What building needs and isn't installed: {what, button word, download page, winget arguments, what the confirm
+    // window says about it}. Build Tools 2026 (vs18, as the port is built with): the compiler, Windows SDK and CMake
+    // without the Visual Studio editor; --passive shows the installer's progress without asking anything.
+    static readonly string[] GitTool = { "Git", "Git", "https://git-scm.com/download/win",
+        "install --id Git.Git --exact --source winget --silent --accept-package-agreements --accept-source-agreements",
+        "Git for Windows (about 70 MB). License: GNU GPL v2." };
+    static readonly string[] CppTool = { "the Visual Studio C++ Build Tools", "C++ tools", "https://visualstudio.microsoft.com/visual-cpp-build-tools/",
+        "install --id Microsoft.VisualStudio.BuildTools --exact --source winget --accept-package-agreements --accept-source-agreements " +
+        "--override \"--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.CMake.Project --includeRecommended\"",
+        "Visual Studio Build Tools 2026: the C++ compiler, Windows SDK and CMake, without the Visual Studio editor (several GB; " +
+        "its own progress window shows the download; Windows asks for administrator permission). " +
+        "License: https://visualstudio.microsoft.com/license-terms/" };
+
+    // The exact winget commands, and only on "Yes" one after the other (output in the log); then checked again.
+    static void ConfirmInstall(List<string[]> tools)
+    {
+        string text = "The launcher will run these commands with Windows' package manager (winget):\n\n" +
+                      string.Join("\n\n", tools.Select(t => "• " + t[4] + "\n   winget " + t[3])) +
+                      "\n\n\"Yes\" installs " + (tools.Count == 1 ? "it" : "them") + " and accepts " + (tools.Count == 1 ? "its license" : "their licenses") + ". Install now?";
+        if (MessageBox.Show(form, text, "Install the build tools", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+        InstallNext(tools, 0);
+    }
+
+    static void InstallNext(List<string[]> tools, int i)
+    {
+        if (i == tools.Count)
+        {
+            ShowState(); // found now: "Build the game"; still missing: the button again
+            return;
+        }
+        Busy("Installing " + tools[i][1] + " with winget (this can take a while) ...");
+        RunProcess(Winget, tools[i][3], code =>
+        {
+            Log(code == 0 ? tools[i][1] + " installed." : "winget ended with code 0x" + code.ToString("X8") + " for " + tools[i][1] + " (see above).");
+            InstallNext(tools, i + 1);
+        });
+    }
+
     static List<string[]> MissingTools()
     {
         // An installer changes the system PATH, not this process's: read it again, so Git installed while the
@@ -233,10 +275,9 @@ static class Launcher
             catch (ArgumentException) { return false; } // a malformed PATH entry
         });
         if (!git)
-            missing.Add(new[] { "Git", "Git", "https://git-scm.com/download/win" });
+            missing.Add(GitTool);
         if (!HasCppTools())
-            missing.Add(new[] { "the Visual Studio C++ Build Tools", "C++ tools",
-                                "https://visualstudio.microsoft.com/visual-cpp-build-tools/" });
+            missing.Add(CppTool);
         return missing;
     }
 
@@ -540,7 +581,7 @@ static class Launcher
     {
         var p = running;
         if (p == null || p.HasExited || e.CloseReason != CloseReason.UserClosing) return;
-        if (MessageBox.Show(form, "Stop the build? Pressing the button again later continues it.", "GHS:SCPC", MessageBoxButtons.YesNo) != DialogResult.Yes) { e.Cancel = true; return; }
+        if (MessageBox.Show(form, "Stop what is running (see the log)? Pressing the button again later continues it.", "GHS:SCPC", MessageBoxButtons.YesNo) != DialogResult.Yes) { e.Cancel = true; return; }
         Process.Start(new ProcessStartInfo("taskkill", "/T /F /PID " + p.Id) { UseShellExecute = false, CreateNoWindow = true }).WaitForExit();
     }
 

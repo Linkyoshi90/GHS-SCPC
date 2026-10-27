@@ -40,7 +40,7 @@ Not affiliated with or endorsed by the game's publisher or rights holders. All t
 | **System** | Windows 10 or 11, 64-bit. A DirectX 11 graphics card (any from the last decade). |
 | **The game** | Your own dump of the **European disc, SLES-51933** (v1.00), as a plain **`.iso`** file. Other formats (`.bin/.cue`, `.chd`, `.cso`) and other releases (US, Japan) are not supported as the main game. The launcher checks the version. |
 | **Git** | https://git-scm.com/download/win (default options are fine). |
-| **C++ Build Tools** | The free **Visual Studio C++ Build Tools** with **"Desktop development with C++"** ticked: https://visualstudio.microsoft.com/visual-cpp-build-tools/ (a full Visual Studio with that workload works too; built and tested with Visual Studio 2026). The launcher checks for Git and these and links their download pages when one is missing. |
+| **C++ Build Tools** | The free **Visual Studio C++ Build Tools** with **"Desktop development with C++"** ticked: https://visualstudio.microsoft.com/visual-cpp-build-tools/ (a full Visual Studio with that workload works too; built and tested with Visual Studio 2026). The launcher checks for Git and these; when one is missing, its button installs them with winget (Windows' package manager) after showing the exact commands, or opens the download pages where winget isn't available. |
 | **Internet** | The build downloads the recompiler (PS2Recomp) and libraries (raylib, Dear ImGui, FFmpeg). |
 | **Disk space** | About **15 GB** free: the unpacked game (3 GB), the recompiler and its build (7 GB), the generated code (0.3 GB), plus room for logs and saves. Visual Studio itself is not counted. |
 | **Time** | The one-time build takes **30 to 60 minutes**, depending on your CPU. |
