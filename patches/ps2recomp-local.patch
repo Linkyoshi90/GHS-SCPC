@@ -2699,10 +2699,10 @@ index 4c3f641..71b26ee 100644
      uint64_t nativeImageUploadCount() const { return m_nativeImageUploadCount; }
 diff --git a/ps2xRuntime/include/runtime/gs/gs_gpu_backend.h b/ps2xRuntime/include/runtime/gs/gs_gpu_backend.h
 new file mode 100644
-index 0000000..729c574
+index 0000000..8969a87
 --- /dev/null
 +++ b/ps2xRuntime/include/runtime/gs/gs_gpu_backend.h
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,140 @@
 +#pragma once
 +
 +#include "runtime/gs/gs_cpu_backend.h"
@@ -2761,7 +2761,8 @@ index 0000000..729c574
 +    // The image is built in `spare` (a buffer kept by the caller: no fresh 6 MB per frame at 3x), swapped with frame's.
 +    bool ScaleFrame(uint64_t ticket, const GSPresentationRequest &request, PresentationFrame &frame, std::vector<uint8_t> &spare);
 +    // The resolution scale, also while running (the F2 settings window): 1-4, 1 = no scaled surfaces. New
-+    // surfaces start from VRAM at the next FINISH, so a frame or two after a change look like 1x.
++    // surfaces start from VRAM at the next FINISH, so a frame or two after a change look like 1x. Scale() is 0 while
++    // the device is lost (the CPU draws).
 +    void SetScale(uint32_t scale);
 +    uint32_t Scale() const;
 +    // Scaled modes: the light-map composite reads a filtered light map (smooth shadows; default on). 1x unchanged.
@@ -8862,7 +8863,7 @@ index 0000000..a02bdc7
 +    void triangleRow(const TriangleSetup &setup, float py, int xStart, int xEnd, const RowPixels &out);
 +}
 diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
-index 5658928..9ed7257 100644
+index 5658928..352eacc 100644
 --- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
 +++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
 @@ -1,14 +1,77 @@
@@ -8943,7 +8944,7 @@ index 5658928..9ed7257 100644
  
  namespace
  {
-@@ -105,8 +168,42 @@ namespace
+@@ -105,8 +168,47 @@ namespace
  }
  
  
@@ -8958,7 +8959,12 @@ index 5658928..9ed7257 100644
 +#ifdef _WIN32
 +        // The D3D11 compute backend (gs_gpu_backend.h) unless GHS_GS_GPU=0 or there is no D3D11 compute device.
 +        // With GHS_GS_REPLAY the threaded backend's constructor replays the recording on it and exits.
-+        if (const char *gpu = std::getenv("GHS_GS_GPU"); !gpu || gpu[0] != '0')
++        if (const char *gpu = std::getenv("GHS_GS_GPU"); gpu && gpu[0] == '0')
++        {
++            void ghsGsSetCpuReason(const char *why); // gs_gpu_backend.cpp: for the settings window
++            ghsGsSetCpuReason("switched off at launch (GHS_GS_GPU=0, launch.ps1 -Cpu)");
++        }
++        else
 +        {
 +            if (const char *test = std::getenv("GHS_GS_GPU_SELFTEST"))
 +                std::exit(GSGpuBackend::SelfTest(static_cast<uint32_t>(std::atoi(test)), 3000) ? 0 : 1);
@@ -8987,7 +8993,7 @@ index 5658928..9ed7257 100644
  {
      reset();
  }
-@@ -117,7 +214,7 @@ void GS::init(uint8_t *vram, uint32_t vramSize, GSRegisters *privRegs)
+@@ -117,7 +219,7 @@ void GS::init(uint8_t *vram, uint32_t vramSize, GSRegisters *privRegs)
      m_localMemorySize = vramSize;
      m_privRegs = privRegs;
      if (!m_backend)
@@ -8996,7 +9002,7 @@ index 5658928..9ed7257 100644
      m_backend->Initialize(vram, vramSize);
      reset();
  }
-@@ -524,10 +621,234 @@ GSPresentationRequest GS::buildPresentationRequestUnlocked() const
+@@ -524,10 +626,234 @@ GSPresentationRequest GS::buildPresentationRequestUnlocked() const
      return request;
  }
  
@@ -9231,7 +9237,7 @@ index 5658928..9ed7257 100644
          std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
          if (!m_backend || !m_privRegs)
          {
-@@ -538,19 +859,13 @@ void GS::latchHostPresentationFrame()
+@@ -538,19 +864,13 @@ void GS::latchHostPresentationFrame()
              return;
          }
          request = buildPresentationRequestUnlocked();
@@ -9256,7 +9262,7 @@ index 5658928..9ed7257 100644
      const bool hasFrame = static_cast<bool>(frame);
      const uint32_t displayFbp = frame.displayFbp;
      const uint32_t sourceFbp = frame.sourceFbp;
-@@ -559,7 +874,7 @@ void GS::latchHostPresentationFrame()
+@@ -559,7 +879,7 @@ void GS::latchHostPresentationFrame()
      const bool usedPreferred = frame.usedPreferred;
      {
          std::lock_guard<std::mutex> presentationLock(m_presentationMutex);
@@ -9265,7 +9271,7 @@ index 5658928..9ed7257 100644
          m_hostPresentationWidth = width;
          m_hostPresentationHeight = height;
          m_hostPresentationDisplayFbp = displayFbp;
-@@ -567,6 +882,7 @@ void GS::latchHostPresentationFrame()
+@@ -567,6 +887,7 @@ void GS::latchHostPresentationFrame()
          m_hostPresentationUsedPreferred = usedPreferred;
          m_hasHostPresentationFrame = hasFrame;
      }
@@ -9273,7 +9279,7 @@ index 5658928..9ed7257 100644
  
      if (hasFrame)
      {
-@@ -610,7 +926,8 @@ bool GS::copyLatchedHostPresentationFrame(std::vector<uint8_t> &outPixels,
+@@ -610,7 +931,8 @@ bool GS::copyLatchedHostPresentationFrame(std::vector<uint8_t> &outPixels,
      outPixels.resize(packedRowBytes * static_cast<size_t>(outHeight));
      if (outWidth != 0u && outHeight != 0u)
      {
@@ -9283,7 +9289,7 @@ index 5658928..9ed7257 100644
          for (uint32_t y = 0; y < outHeight; ++y)
          {
              const size_t srcOffset = static_cast<size_t>(y) * sourceRowBytes;
-@@ -638,8 +955,41 @@ bool GS::copyLatchedHostPresentationFrame(std::vector<uint8_t> &outPixels,
+@@ -638,8 +960,41 @@ bool GS::copyLatchedHostPresentationFrame(std::vector<uint8_t> &outPixels,
      return true;
  }
  
@@ -9325,7 +9331,7 @@ index 5658928..9ed7257 100644
      std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
      if (!data || sizeBytes < 16 || !m_backend)
          return;
-@@ -911,6 +1261,50 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+@@ -911,6 +1266,50 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
          uint32_t z = static_cast<uint32_t>((hi >> 4) & 0xFFFFFF);
          uint8_t f = static_cast<uint8_t>((hi >> 36) & 0xFF);
          bool adk = ((hi >> 47) & 1) != 0;
@@ -9376,7 +9382,7 @@ index 5658928..9ed7257 100644
          PS2_IF_AGRESSIVE_LOGS({
              const uint32_t debugIndex = s_debugGsPackedVertexCount.fetch_add(1, std::memory_order_relaxed);
              if (debugIndex < 64u)
-@@ -940,7 +1334,9 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+@@ -940,7 +1339,9 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
          vtx.u = m_curU;
          vtx.v = m_curV;
          vtx.fog = f;
@@ -9387,7 +9393,7 @@ index 5658928..9ed7257 100644
          break;
      }
      case 0x05:
-@@ -949,6 +1345,13 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+@@ -949,6 +1350,13 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
          uint16_t y = static_cast<uint16_t>((lo >> 32) & 0xFFFF);
          uint32_t z = static_cast<uint32_t>(hi & 0xFFFFFFFF);
          bool adk = ((hi >> 47) & 1) != 0;
@@ -9401,7 +9407,7 @@ index 5658928..9ed7257 100644
          PS2_IF_AGRESSIVE_LOGS({
              const uint32_t debugIndex = s_debugGsPackedVertexCount.fetch_add(1, std::memory_order_relaxed);
              if (debugIndex < 64u)
-@@ -977,7 +1380,9 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+@@ -977,7 +1385,9 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
          vtx.u = m_curU;
          vtx.v = m_curV;
          vtx.fog = m_curFog;
@@ -9412,7 +9418,7 @@ index 5658928..9ed7257 100644
          break;
      }
      case 0x0A:
-@@ -1011,6 +1416,7 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+@@ -1011,6 +1421,7 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
          vtx.u = m_curU;
          vtx.v = m_curV;
          vtx.fog = static_cast<uint8_t>((hi >> 36) & 0xFF);
@@ -9420,7 +9426,7 @@ index 5658928..9ed7257 100644
          vertexKick(false);
          break;
      }
-@@ -1042,6 +1448,7 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+@@ -1042,6 +1453,7 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
          vtx.u = m_curU;
          vtx.v = m_curV;
          vtx.fog = m_curFog;
@@ -9428,7 +9434,7 @@ index 5658928..9ed7257 100644
          vertexKick(false);
          break;
      }
-@@ -1059,14 +1466,62 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+@@ -1059,14 +1471,62 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
      }
  }
  
@@ -9491,7 +9497,7 @@ index 5658928..9ed7257 100644
      const bool interestingReg =
          regAddr == GS_REG_PRIM ||
          regAddr == GS_REG_RGBAQ ||
-@@ -1190,6 +1645,12 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+@@ -1190,6 +1650,12 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
          vtx.y = static_cast<float>((value >> 16) & 0xFFFF) / 16.0f;
          vtx.z = static_cast<double>((value >> 32) & 0xFFFFFF);
          vtx.fog = static_cast<uint8_t>((value >> 56) & 0xFF);
@@ -9504,7 +9510,7 @@ index 5658928..9ed7257 100644
          vtx.r = m_curR;
          vtx.g = m_curG;
          vtx.b = m_curB;
-@@ -1239,6 +1700,75 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+@@ -1239,6 +1705,75 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
          t.csm = static_cast<uint8_t>((value >> 55) & 0x1);
          t.csa = static_cast<uint8_t>((value >> 56) & 0x1F);
          t.cld = static_cast<uint8_t>((value >> 61) & 0x7);
@@ -9580,7 +9586,7 @@ index 5658928..9ed7257 100644
          m_backend->LoadClut(t, m_texclut);
          break;
      }
-@@ -1337,6 +1867,9 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+@@ -1337,6 +1872,9 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
          m_ctx[ci].frame.fbw = static_cast<uint32_t>((value >> 16) & 0x3F);
          m_ctx[ci].frame.psm = static_cast<uint8_t>((value >> 24) & 0x3F);
          m_ctx[ci].frame.fbmsk = static_cast<uint32_t>((value >> 32) & 0xFFFFFFFF);
@@ -9590,7 +9596,7 @@ index 5658928..9ed7257 100644
          break;
      }
      case GS_REG_ZBUF_1:
-@@ -1346,6 +1879,11 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+@@ -1346,6 +1884,11 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
          m_ctx[ci].zbuf.zbp = value & 0x1FF;
          m_ctx[ci].zbuf.psm = ((value >> 24) & 0xF) | 0x30;
          m_ctx[ci].zbuf.zmask = (value >> 32) & 1;
@@ -9602,7 +9608,7 @@ index 5658928..9ed7257 100644
          break;
      }
      case GS_REG_FBA_1:
-@@ -1383,6 +1921,19 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+@@ -1383,6 +1926,19 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
      case GS_REG_TRXDIR:
      {
          m_trxdir = static_cast<uint32_t>(value & 0x3);
@@ -9622,7 +9628,7 @@ index 5658928..9ed7257 100644
  
          if (m_backend)
          {
-@@ -1480,9 +2031,15 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+@@ -1480,9 +2036,15 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
          {
              m_backend->Flush();
              m_backend->Sync(GSSyncReason::Finish);
@@ -9638,7 +9644,7 @@ index 5658928..9ed7257 100644
          break;
      }
      case GS_REG_LABEL:
-@@ -1528,6 +2085,17 @@ void GS::vertexKick(bool drawing)
+@@ -1528,6 +2090,17 @@ void GS::vertexKick(bool drawing)
  {
      ++m_vtxCount;
      ++m_vtxIndex;
@@ -9656,7 +9662,7 @@ index 5658928..9ed7257 100644
  
      PS2_IF_AGRESSIVE_LOGS({
          const uint32_t debugIndex = s_debugGsVertexKickCount.fetch_add(1, std::memory_order_relaxed);
-@@ -1607,6 +2175,7 @@ void GS::vertexKick(bool drawing)
+@@ -1607,6 +2180,7 @@ void GS::vertexKick(bool drawing)
      }
  }
  
@@ -9664,7 +9670,7 @@ index 5658928..9ed7257 100644
  void GS::processImageData(const uint8_t *data, uint32_t sizeBytes)
  {
      if (m_backend)
-@@ -1616,18 +2185,36 @@ void GS::processImageData(const uint8_t *data, uint32_t sizeBytes)
+@@ -1616,18 +2190,36 @@ void GS::processImageData(const uint8_t *data, uint32_t sizeBytes)
  
  bool GS::clearFramebufferContext(uint32_t contextIndex, uint32_t rgba)
  {
@@ -9701,7 +9707,7 @@ index 5658928..9ed7257 100644
      std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
      return m_backend ? m_backend->ConsumeLocalToHostBytes(dst, maxBytes) : 0u;
  }
-@@ -1635,7 +2222,7 @@ uint32_t GS::consumeLocalToHostBytes(uint8_t *dst, uint32_t maxBytes)
+@@ -1635,7 +2227,7 @@ uint32_t GS::consumeLocalToHostBytes(uint8_t *dst, uint32_t maxBytes)
  void GS::setRasterBackend(std::unique_ptr<GSRasterBackend> backend)
  {
      if (!backend)
@@ -9710,7 +9716,7 @@ index 5658928..9ed7257 100644
  
      std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
      std::lock_guard<std::mutex> backendLock(m_backendLifetimeMutex);
-@@ -1669,6 +2256,11 @@ uint32_t GS::ReadVram(uint32_t psm, uint32_t base, uint32_t bw, uint32_t x, uint
+@@ -1669,6 +2261,11 @@ uint32_t GS::ReadVram(uint32_t psm, uint32_t base, uint32_t bw, uint32_t x, uint
  
  void GS::WriteVram(uint32_t psm, uint32_t base, uint32_t bw, uint32_t x, uint32_t y, uint32_t value)
  {
@@ -9722,7 +9728,7 @@ index 5658928..9ed7257 100644
      std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
      if (m_backend)
          m_backend->WriteVram(psm, base, bw, x, y, value);
-@@ -1681,7 +2273,7 @@ GSPrimitiveBatch GS::buildDrawBatch(int vertexCount) const
+@@ -1681,7 +2278,7 @@ GSPrimitiveBatch GS::buildDrawBatch(int vertexCount) const
      for (int i = 0; i < batch.vertexCount; ++i)
          batch.vertices[static_cast<size_t>(i)] = m_vtxQueue[i];
      batch.state.context = m_ctx[m_prim.ctxt ? 1 : 0];
@@ -9733,10 +9739,10 @@ index 5658928..9ed7257 100644
      batch.state.pabe = m_pabe;
 diff --git a/ps2xRuntime/src/lib/gs/gs_gpu_backend.cpp b/ps2xRuntime/src/lib/gs/gs_gpu_backend.cpp
 new file mode 100644
-index 0000000..c556716
+index 0000000..4f2f1a2
 --- /dev/null
 +++ b/ps2xRuntime/src/lib/gs/gs_gpu_backend.cpp
-@@ -0,0 +1,3409 @@
+@@ -0,0 +1,3646 @@
 +// GHS: GS rasterizer on the GPU (see gs_gpu_backend.h, docs\GS_GPU_BACKEND.md and docs\GS_RASTERIZER_PLAN.md, option A).
 +// The kernels are HLSL ports of GSCpuBackend's per-pixel code and of GSMem's swizzle; the per-primitive setup
 +// (bounding box, edge denominators, Z of a sprite) runs here on the CPU with the CPU backend's own expressions,
@@ -10086,11 +10092,9 @@ index 0000000..c556716
 +    }
 +}
 +
-+// static_cast<uint32_t>(double) as MSVC x64 does it (truncate to int64, keep the low 32 bits).
-+uint truncLow32(double d)
++// static_cast<uint32_t>(double) as MSVC x64 does it (truncate to int64, keep the low 32 bits), from the double's bits.
++uint truncLow32Bits(uint lo, uint hi)
 +{
-+    uint lo, hi;
-+    asuint(d, lo, hi);
 +    const uint e = (hi >> 20) & 0x7FFu;
 +    if (e < 1023u)
 +        return 0u;
@@ -10107,6 +10111,165 @@ index 0000000..c556716
 +    }
 +    return (hi >> 31) != 0u ? 0u - r : r;
 +}
++#ifndef NO_DOUBLES
++uint truncLow32(double d)
++{
++    uint lo, hi;
++    asuint(d, lo, hi);
++    return truncLow32Bits(lo, hi);
++}
++#endif
++
++)HLSL"
++                                 R"HLSL(
++// The low and high words of a * b.
++uint2 mul32x32(uint a, uint b)
++{
++    const uint a0 = a & 0xFFFFu, a1 = a >> 16, b0 = b & 0xFFFFu, b1 = b >> 16;
++    const uint p00 = a0 * b0, mid = a0 * b1 + (p00 >> 16), mid2 = a1 * b0 + (mid & 0xFFFFu);
++    return uint2((mid2 << 16) | (p00 & 0xFFFFu), a1 * b1 + (mid >> 16) + (mid2 >> 16));
++}
++
++#ifdef NO_DOUBLES
++// GPUs without double-precision shaders (D3D11_FEATURE_DOUBLES; DXVK reports Vulkan's shaderFloat64): drawPixel's
++// Z math in IEEE double done with integers, each operation rounded to nearest even like the double version, so both
++// give the same bits. A double is uint2(low word, high word). Only finite normal values and zero reach here (vertex
++// Z times a barycentric weight, sums, + 0.5); a denormal float weight counts as zero (its product can't move the
++// truncated result).
++struct Soft
++{
++    uint sign;
++    int e;   // the exponent of bit 63 of m
++    uint2 m; // the mantissa, bit 63 set (zero: all clear)
++};
++
++Soft unpackDouble(uint2 d)
++{
++    Soft s;
++    const uint be = (d.y >> 20) & 0x7FFu;
++    s.sign = d.y >> 31;
++    s.e = (int)be - 1023;
++    s.m = be == 0u ? uint2(0u, 0u) : uint2(d.x << 11, (((d.y & 0xFFFFFu) | 0x100000u) << 11) | (d.x >> 21));
++    return s;
++}
++
++// Rounded to 53 bits (nearest even) from bit 63 down; the lowest bit may be a sticky one.
++uint2 packDouble(Soft s)
++{
++    if ((s.m.x | s.m.y) == 0u)
++        return uint2(0u, s.sign << 31);
++    uint2 mant = uint2((s.m.x >> 11) | (s.m.y << 21), s.m.y >> 11);
++    const uint rest = s.m.x & 0x7FFu;
++    if (rest > 0x400u || (rest == 0x400u && (mant.x & 1u) != 0u))
++    {
++        mant.x += 1u;
++        if (mant.x == 0u)
++            mant.y += 1u;
++        if (mant.y == 0x200000u) // carried to 2^53
++        {
++            mant = uint2(0u, 0x100000u);
++            s.e += 1;
++        }
++    }
++    return uint2(mant.x, (s.sign << 31) | ((uint)(s.e + 1023) << 20) | (mant.y & 0xFFFFFu));
++}
++
++// m >> n, the bits shifted out ORed into the lowest bit (enough for correct rounding with the guard bits below).
++uint2 shiftRightSticky(uint2 m, uint n)
++{
++    if (n == 0u)
++        return m;
++    if (n >= 64u)
++        return uint2((m.x | m.y) != 0u ? 1u : 0u, 0u);
++    uint2 r;
++    uint lost;
++    if (n >= 32u)
++    {
++        const uint k = n - 32u;
++        r = uint2(k == 0u ? m.y : m.y >> k, 0u);
++        lost = m.x | (k == 0u ? 0u : m.y << (32u - k));
++    }
++    else
++    {
++        r = uint2((m.x >> n) | (m.y << (32u - n)), m.y >> n);
++        lost = m.x << (32u - n);
++    }
++    r.x |= lost != 0u ? 1u : 0u;
++    return r;
++}
++
++// d * (double)f rounded to a double.
++uint2 mulDF(uint2 d, float f)
++{
++    const Soft a = unpackDouble(d);
++    const uint fb = asuint(f), fe = (fb >> 23) & 0xFFu, sign = a.sign ^ (fb >> 31);
++    if ((a.m.x | a.m.y) == 0u || fe == 0u)
++        return uint2(0u, sign << 31);
++    // The exact 77-bit product of the 53- and 24-bit mantissas in w0..w2, its top bit at 75 or 76.
++    const uint2 ma = uint2((a.m.x >> 11) | (a.m.y << 21), a.m.y >> 11);
++    const uint mf = (fb & 0x7FFFFFu) | 0x800000u;
++    const uint2 lo = mul32x32(ma.x, mf), hi = mul32x32(ma.y, mf);
++    const uint w0 = lo.x, w1 = lo.y + hi.x, w2 = hi.y + (w1 < lo.y ? 1u : 0u);
++    const uint top = (w2 >> 12) != 0u ? 76u : 75u, sh = top - 63u;
++    Soft r;
++    r.sign = sign;
++    r.e = (int)top + a.e - 52 + (int)fe - 127 - 23;
++    r.m = uint2((w1 << (32u - sh)) | (w0 >> sh) | ((w0 & ((1u << sh) - 1u)) != 0u ? 1u : 0u), (w2 << (32u - sh)) | (w1 >> sh));
++    return packDouble(r);
++}
++
++// a + b rounded to a double.
++uint2 addDD(uint2 da, uint2 db)
++{
++    Soft a = unpackDouble(da), b = unpackDouble(db);
++    if ((b.m.x | b.m.y) == 0u)
++        return da;
++    if ((a.m.x | a.m.y) == 0u)
++        return db;
++    if (b.e > a.e || (b.e == a.e && (b.m.y > a.m.y || (b.m.y == a.m.y && b.m.x > a.m.x)))) // a: the larger magnitude
++    {
++        const Soft t = a;
++        a = b;
++        b = t;
++    }
++    const uint2 ma = uint2((a.m.x >> 1) | (a.m.y << 31), a.m.y >> 1); // bit 63 free for the carry
++    const uint2 mb = shiftRightSticky(b.m, 1u + (uint)(a.e - b.e));
++    uint2 m;
++    if (a.sign == b.sign)
++    {
++        m.x = ma.x + mb.x;
++        m.y = ma.y + mb.y + (m.x < ma.x ? 1u : 0u);
++    }
++    else
++    {
++        m.x = ma.x - mb.x;
++        m.y = ma.y - mb.y - (ma.x < mb.x ? 1u : 0u);
++    }
++    if ((m.x | m.y) == 0u)
++        return uint2(0u, 0u);
++    Soft r;
++    r.sign = a.sign;
++    r.e = a.e + 1;
++    if (m.y == 0u)
++    {
++        m = uint2(0u, m.x);
++        r.e -= 32;
++    }
++    const uint n = 31u - firstbithigh(m.y);
++    if (n != 0u)
++    {
++        m = uint2(m.x << n, (m.y << n) | (m.x >> (32u - n)));
++        r.e -= (int)n;
++    }
++    r.m = m;
++    return packDouble(r);
++}
++
++uint truncLow32(uint2 d)
++{
++    return truncLow32Bits(d.x, d.y);
++}
++#endif
 +
 +)HLSL"
 +                                 R"HLSL(
@@ -10301,7 +10464,10 @@ index 0000000..c556716
 +    return o;
 +}
 +
++)HLSL"
++                                 R"HLSL(
 +// 1 / q correctly rounded (D3D11 float division is not): two Newton steps in double, then one rounding.
++#ifndef NO_DOUBLES
 +float rcpExact(float q)
 +{
 +    precise double qd = (double)q;
@@ -10310,6 +10476,39 @@ index 0000000..c556716
 +    r = r + r * (1.0 - qd * r);
 +    return (float)r;
 +}
++#else
++// Without doubles: rcp is within 1 ulp, so the answer is within 2 floats of it; of those five the one with the
++// smallest |1 - q r| (exact, in integers: q is the same for all) is the correctly rounded one.
++float rcpExact(float q)
++{
++    // |q| by masking: fxc /O3 folds abs() into an operand modifier the integer ops can't take (internal error X8000).
++    const uint qb = asuint(q) & 0x7FFFFFFFu, rb = asuint(rcp(asfloat(qb)));
++    const uint qe = (qb >> 23) & 0xFFu, re = ((rb - 2u) >> 23) & 0xFFu;
++    const int s = 300 - (int)qe - (int)re; // 1 = 2^s on the scale of mq * mr at the smallest candidate's exponent
++    if (qe == 0u || qe == 255u || re == 0u || ((rb + 2u) >> 23) >= 255u || s < 0 || s > 62)
++        return rcp(q); // far outside what the game draws with
++    const uint mq = (qb & 0x7FFFFFu) | 0x800000u;
++    const uint2 one = s >= 32 ? uint2(0u, 1u << (uint)(s - 32)) : uint2(1u << (uint)s, 0u);
++    uint best = rb;
++    uint2 bestD = uint2(0xFFFFFFFFu, 0xFFFFFFFFu);
++    for (uint k = 0u; k < 5u; ++k)
++    {
++        const uint cb = rb - 2u + k;
++        uint2 p = mul32x32(mq, (cb & 0x7FFFFFu) | 0x800000u);
++        if (((cb >> 23) & 0xFFu) != re) // one exponent up
++            p = uint2(p.x << 1, (p.y << 1) | (p.x >> 31));
++        const bool above = p.y > one.y || (p.y == one.y && p.x >= one.x);
++        const uint2 hi = above ? p : one, lo = above ? one : p;
++        const uint2 d = uint2(hi.x - lo.x, hi.y - lo.y - (hi.x < lo.x ? 1u : 0u));
++        if (d.y < bestD.y || (d.y == bestD.y && d.x < bestD.x))
++        {
++            bestD = d;
++            best = cb;
++        }
++    }
++    return q < 0.0f ? -asfloat(best) : asfloat(best);
++}
++#endif
 +
 +// One primitive's pixel. Record words: 0 kind (0 sprite, 1 triangle), 1-4 box x0 y0 x1 y1 (inclusive),
 +// 5-16 WritePixel state, sprite 17 z 18 rgba 19 fog, triangle 20-25 x/y, 26 winding, 27 1/|denom|,
@@ -10376,6 +10575,10 @@ index 0000000..c556716
 +    precise float w2 = 1.0f - w0 - w1;
 +    if (w0 < -eps || w1 < -eps || w2 < -eps)
 +        return;
++#ifdef NO_DOUBLES
++    const uint2 z = addDD(addDD(mulDF(uint2(prm(28), prm(29)), w0), mulDF(uint2(prm(30), prm(31)), w1)), mulDF(uint2(prm(32), prm(33)), w2));
++    const uint2 zr = addDD(z, uint2(0u, 0x3FE00000u)); // + 0.5
++#else
 +    // Each product times a 1.0 the compiler can't see: the NVIDIA driver fuses dmul + dadd into dfma despite
 +    // `precise` (SelfTest: Z32 near 2^32 one off), and a fused p * 1.0 + s adds the rounded product.
 +    const double one = asdouble(cb(2), cb(3));
@@ -10384,6 +10587,7 @@ index 0000000..c556716
 +    precise double z2 = (asdouble(prm(32), prm(33)) * (double)w2) * one;
 +    precise double z = z0 + z1 + z2;
 +    precise double zr = z + 0.5;
++#endif
 +    const uint c0 = prm(34), c1 = prm(35), c2 = prm(36), fogs = prm(37);
 +    uint4 c = rgbaOf(c2);
 +    if ((prm(15) & 16u) != 0u)
@@ -10752,7 +10956,7 @@ index 0000000..c556716
 +struct KernelJob
 +{
 +    int kernel = 0;
-+    D3D_SHADER_MACRO defines[3] = {};
++    D3D_SHADER_MACRO defines[4] = {}; // up to three and the terminator
 +    char cacheName[96] = {};
 +    ComPtr<ID3DBlob> code, errors;
 +    HRESULT hr = S_OK;
@@ -10789,6 +10993,17 @@ index 0000000..c556716
 +}
 +
 +static ComPtr<ID3DBlob> s_code[kKernelCount]; // compiled once: a new device after a loss reuses them
++// The kernels are compiled with NO_DOUBLES (Device::Create). GHS-TRACE: GHS_GS_NO_DOUBLES=1 forces it (SelfTest on a
++// GPU that has doubles).
++static bool s_noDoubles = std::getenv("GHS_GS_NO_DOUBLES") != nullptr;
++// Why the GS runs on the CPU (the settings window shows it): the last device failure or loss.
++static std::mutex s_cpuReasonMutex;
++static std::string s_cpuReason = "no D3D11 device";
++static void SetCpuReason(const std::string &why)
++{
++    std::lock_guard<std::mutex> lock(s_cpuReasonMutex);
++    s_cpuReason = why;
++}
 +// The background compile's optimised kernels, until the backend takes them (FlushRun).
 +static std::mutex s_optimisedMutex;
 +static ComPtr<ID3DBlob> s_optimised[kKernelCount];
@@ -10904,9 +11119,15 @@ index 0000000..c556716
 +            hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels + 1, 1, D3D11_SDK_VERSION, &d->device, nullptr, &d->ctx);
 +        if (FAILED(hr))
 +            return fail("D3D11CreateDevice", hr);
++        // Without double-precision shaders (Intel Arc/Xe; under Proton, DXVK on a Vulkan device without shaderFloat64)
++        // the kernels are compiled with NO_DOUBLES: the same results, the double math done with integers.
 +        D3D11_FEATURE_DATA_DOUBLES doubles{};
 +        if (FAILED(d->device->CheckFeatureSupport(D3D11_FEATURE_DOUBLES, &doubles, sizeof(doubles))) || !doubles.DoublePrecisionFloatShaderOps)
-+            return fail("double-precision shader support", E_FAIL);
++        {
++            if (s_code[0] && !s_noDoubles) // compiled for the first device, which had them
++                return fail("double-precision shader support", E_FAIL);
++            s_noDoubles = true;
++        }
 +
 +        D3D11_BUFFER_DESC desc{};
 +        desc.ByteWidth = kVramBytes;
@@ -10994,6 +11215,8 @@ index 0000000..c556716
 +                job.defines[n++] = {"NO_LIGHTMAP_FILTERS", "1"};
 +            if (s_define)
 +                job.defines[n++] = {s_define, "1"};
++            if (s_noDoubles)
++                job.defines[n++] = {"NO_DOUBLES", "1"};
 +            uint64_t key = 1469598103934665603ull;
 +            const auto mix = [&key](const char *text)
 +            {
@@ -11038,9 +11261,10 @@ index 0000000..c556716
 +                return fail("compute shader", hr);
 +        }
 +        if (!jobs.empty() || cached != 0)
-+            std::fprintf(stderr, "[GHS-GSGPU] kernels ready in %.0f ms (%zu compiled%s, %d from shader_cache)\n",
++            std::fprintf(stderr, "[GHS-GSGPU] kernels ready in %.0f ms (%zu compiled%s, %d from shader_cache)%s\n",
 +                         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - compileStart).count(), jobs.size(),
-+                         jobs.empty() || s_unoptimisedOnly ? "" : " unoptimised, optimised ones follow", cached);
++                         jobs.empty() || s_unoptimisedOnly ? "" : " unoptimised, optimised ones follow", cached,
++                         s_noDoubles ? ", without double precision (NO_DOUBLES)" : "");
 +        if (s_unoptimisedOnly)
 +            for (KernelJob &job : jobs)
 +                WriteCache(job);
@@ -11057,6 +11281,9 @@ index 0000000..c556716
 +                        std::lock_guard<std::mutex> lock(s_optimisedMutex);
 +                        s_optimised[job.kernel] = job.code;
 +                    }
++                    else // that kernel stays unoptimised
++                        std::fprintf(stderr, "[GHS-GSGPU] optimised %s: %s\n", kEntry[job.kernel],
++                                     job.errors ? static_cast<const char *>(job.errors->GetBufferPointer()) : "compile failed");
 +                s_optimisedReady = true;
 +                std::fprintf(stderr, "[GHS-GSGPU] optimised kernels compiled in %.0f s (shader_cache)\n",
 +                             std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count()); })
@@ -11067,6 +11294,9 @@ index 0000000..c556716
 +    static std::unique_ptr<Device> fail(const char *what, HRESULT hr)
 +    {
 +        std::fprintf(stderr, "[GHS-GSGPU] %s failed (0x%08lx): the GS stays on the CPU\n", what, static_cast<unsigned long>(hr));
++        char why[160];
++        std::snprintf(why, sizeof(why), "%s failed (0x%08lx)", what, static_cast<unsigned long>(hr));
++        SetCpuReason(why);
 +        return nullptr;
 +    }
 +
@@ -11287,7 +11517,7 @@ index 0000000..c556716
 +uint32_t GSGpuBackend::Scale() const
 +{
 +    std::lock_guard<std::mutex> lock(m_mutex);
-+    return m_scaling ? m_scaling->scale : 1u;
++    return !m_dev ? 0u : m_scaling ? m_scaling->scale : 1u; // 0: the device is lost, the CPU draws
 +}
 +
 +// The settings window (ps2_debug_panel.cpp): the game's GPU backend's scale; 0 = the GS isn't on the GPU.
@@ -11295,6 +11525,17 @@ index 0000000..c556716
 +{
 +    GSGpuBackend *gpu = g_liveGpu.load();
 +    return gpu ? static_cast<int>(gpu->Scale()) : 0;
++}
++
++// The settings window: why the GS runs on the CPU when ghsGsScale() is 0.
++std::string ghsGsCpuReason()
++{
++    std::lock_guard<std::mutex> lock(s_cpuReasonMutex);
++    return s_cpuReason;
++}
++void ghsGsSetCpuReason(const char *why) // gs_frontend.cpp: GHS_GS_GPU=0
++{
++    SetCpuReason(why);
 +}
 +
 +void ghsGsSetScale(int scale)
@@ -12586,6 +12827,8 @@ index 0000000..c556716
 +        m_transferOnGpu = false;
 +        m_retryAt = m_losses <= 5u ? m_finishes + 600u : UINT64_MAX;
 +        std::fprintf(stderr, "[GHS-GSGPU] no D3D11 device: the GS runs on the CPU backend (one thread)%s\n", m_losses <= 5u ? ", next try in 600 FINISH" : " for good (5 losses)");
++        if (why)
++            SetCpuReason(std::string("the graphics device was lost (") + why + (m_losses <= 5u ? "), trying again" : "), 5 times: until the game restarts"));
 +        return;
 +    }
 +    m_lost = false;
@@ -15391,7 +15634,7 @@ index a8f9fa8..f114e1c 100644
  
  
 diff --git a/ps2xRuntime/src/lib/ps2_debug_panel.cpp b/ps2xRuntime/src/lib/ps2_debug_panel.cpp
-index c9aa2c6..ae2768f 100644
+index c9aa2c6..bc3c57b 100644
 --- a/ps2xRuntime/src/lib/ps2_debug_panel.cpp
 +++ b/ps2xRuntime/src/lib/ps2_debug_panel.cpp
 @@ -9,6 +9,8 @@
@@ -15413,7 +15656,7 @@ index c9aa2c6..ae2768f 100644
  #include <cstdint>
  #include <cstdio>
  #include <cstring>
-@@ -2176,6 +2180,533 @@ namespace
+@@ -2176,6 +2180,534 @@ namespace
  
  #endif
  }
@@ -15421,6 +15664,7 @@ index c9aa2c6..ae2768f 100644
 +// GPU GS's render scale to the smallest one filling that window (the game's image is 640x512: 640x256 fields shown
 +// at double height). The scale needs the GPU GS backend (the default; not with GHS_GS_GPU=0).
 +int ghsGsScale(); // gs_gpu_backend.cpp: 0 = the GS isn't on the GPU
++std::string ghsGsCpuReason(); // gs_gpu_backend.cpp: why not, then
 +void ghsGsSetScale(int scale);
 +extern int g_ghsRenderScale, g_ghsWindowW, g_ghsWindowH; // ps2_pad.cpp, saved with the other settings
 +extern bool g_ghsSmoothShadows;
@@ -15878,7 +16122,8 @@ index c9aa2c6..ae2768f 100644
 +        if (scale > 0)
 +            ImGui::Text("Rendering %dx%d (%dx)", 640 * scale, 512 * scale, scale);
 +        else
-+            ImGui::TextDisabled("Rendering 640x512: render scaling needs the GPU GS\n(it is off: GHS_GS_GPU=0 / launch.ps1 -Cpu, or no D3D11 compute device).");
++            ImGui::TextWrapped("Rendering 640x512 on the CPU (slower; render scale needs the graphics on the GPU). Why: %s",
++                               ghsGsCpuReason().c_str()); // so it can be reported
 +        bool chosen = false;
 +        int chosenW = 0, chosenH = 0;
 +        if (ImGui::BeginListBox("##resolutions", ImVec2(-FLT_MIN, 9.0f * ImGui::GetTextLineHeightWithSpacing())))
@@ -15941,13 +16186,12 @@ index c9aa2c6..ae2768f 100644
 +                    ghsSaveSettings();
 +                }
 +            }
-+        }
-+    }
++        }    }
 +}
  void PS2DebugPanel::initialize()
  {
  #if defined(PS2X_ENABLE_DEBUG_UI) && !defined(PLATFORM_VITA)
-@@ -2183,6 +2714,15 @@ void PS2DebugPanel::initialize()
+@@ -2183,6 +2715,15 @@ void PS2DebugPanel::initialize()
      {
          rlImGuiSetup(true);
          m_initialized = true;
@@ -15963,7 +16207,7 @@ index c9aa2c6..ae2768f 100644
      }
  #endif
  }
-@@ -2198,6 +2738,12 @@ void PS2DebugPanel::shutdown()
+@@ -2198,6 +2739,12 @@ void PS2DebugPanel::shutdown()
  #endif
  }
  
@@ -15976,7 +16220,7 @@ index c9aa2c6..ae2768f 100644
  void PS2DebugPanel::draw(PS2Runtime &runtime)
  {
  #if defined(PS2X_ENABLE_DEBUG_UI) && !defined(PLATFORM_VITA)
-@@ -2211,13 +2757,154 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
+@@ -2211,13 +2758,154 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
          toggleVisible();
      }
  
@@ -16132,7 +16376,7 @@ index c9aa2c6..ae2768f 100644
      ImGui::SetNextWindowSize(ImVec2(780.0f, 620.0f), ImGuiCond_FirstUseEver);
      if (ImGui::Begin("Runtime Debugger", &m_visible, ImGuiWindowFlags_MenuBar))
      {
-@@ -2227,6 +2914,18 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
+@@ -2227,6 +2915,18 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
              ImGui::EndMenuBar();
          }
  
