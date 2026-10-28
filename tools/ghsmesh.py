@@ -6,7 +6,8 @@ endian). Per group: STCYCL, UNPACK V4-32 x3 (word 1 of qword 1 + qword 1 word 1:
 then the GIF tag), UNPACK V4-16 (the vertices), more batches as UNPACK V4-32 x1 (GIF tag: NLOOP vertices, triangle
 strip, bit 15 = end) + UNPACK V4-16, then MSCNT. A vertex is 4 (PM22) or 6 (PM23) int16 quads: position (w 16, or 128
 on PM23), normal (4.12 fixed, w 4096), [PM23: position delta, normal delta], colour (0x80 = 1.0), texture s t q
-(4.12; 0x1000 = the texture's far edge). Strips are counter-clockwise around the normal on even triangles.
+(4.12; 0x1000 = the texture's far edge). Strips: on even triangles (v1-v0)x(v2-v0) points against the normal
+(inwards); the other way round is culled.
 Texture TEX0: TBP0 in the low 14 bits, counted in 256-byte blocks from the character's first image (tools\\ghstex.py
 images in order), CBP = image index in bits 5+ of the high word.
 """
@@ -73,8 +74,8 @@ def texture(data):
 
 
 def strips(batches, quads, pad):
-    """Vertex lists for batches of the given sizes, holding quads (each 4 vertices: counter-clockwise corners seen
-    from the outside) as strips joined by zero-area triangles; a 3-vertex batch takes half a quad. Batches left over
+    """Vertex lists for batches of the given sizes, holding quads (each 4 corners in order around the face, with
+    (p1-p0)x(p3-p0) pointing inwards) as strips joined by zero-area triangles; a 3-vertex batch takes half a quad. Batches left over
     get pad (a vertex) everywhere, so they draw nothing. Returns (lists, quads that did not fit)."""
     todo = [(q[0], q[1], q[3], q[2]) for q in quads]  # strip order: p0 p1 p3 p2
     half = None

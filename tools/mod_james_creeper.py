@@ -75,7 +75,7 @@ def box(x0, x1, y0, y1, z0, z1, rects, morph, faces=("+x", "-x", "-y", "+y", "+z
         p0, p1, p3 = corners[0], corners[1], corners[3]
         a, b = [p1[k] - p0[k] for k in range(3)], [p3[k] - p0[k] for k in range(3)]
         cross = (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
-        if sum(cross[k] * n[k] for k in range(3)) < 0:  # strips must turn counter-clockwise around the normal
+        if sum(cross[k] * n[k] for k in range(3)) > 0:  # the game culls faces whose (p1-p0)x(p3-p0) points outwards
             corners, uv = corners[::-1], uv[::-1]
         quads.append([vertex(p, n, t, shades[f], morph) for p, t in zip(corners, uv)])
     return quads
