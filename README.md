@@ -44,7 +44,7 @@ Not affiliated with or endorsed by the game's publisher or rights holders. All t
 | **Internet** | The build downloads the recompiler (PS2Recomp) and libraries (raylib, Dear ImGui, FFmpeg). |
 | **Disk space** | About **15 GB** free: the unpacked game (3 GB), the recompiler and its build (7 GB), the generated code (0.3 GB), plus room for logs and saves. Visual Studio itself is not counted. |
 | **Time** | The one-time build takes **30 to 60 minutes**, depending on your CPU. |
-| *Optional:* **Python 3** | For the cheat menu's item names, and with **numpy** (`py -m pip install numpy`) for Japanese voices. https://www.python.org/downloads/ |
+| *Optional:* **Python 3** | For the cheat menu's item names, and with **numpy** (`py -m pip install -r requirements.txt`) for Japanese voices. https://www.python.org/downloads/ |
 
 ## Installation and first start
 
@@ -74,6 +74,11 @@ instead of Visual Studio.
 1. Install the build tools and libraries (Debian/Ubuntu names; other distributions have the same packages):
    ```bash
    sudo apt install git cmake ninja-build g++ pkg-config libarchive-tools libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev
+   ```
+   `cmake` and `ninja` can come from pip instead, together with numpy for the Japanese voices; the compiler, git and
+   the `-dev` libraries can't. Distributions keep pip out of the system Python, so use a venv:
+   ```bash
+   python3 -m venv ~/.venvs/ghs && ~/.venvs/ghs/bin/pip install -r requirements.txt && export PATH=~/.venvs/ghs/bin:$PATH
    ```
    For graphics on the GPU also install the [Vulkan SDK](https://vulkan.lunarg.com/) (the build needs its `dxc`, with
    `VULKAN_SDK` set); without it the graphics run on the CPU, which needs a fast CPU.
@@ -132,7 +137,7 @@ Besides playing the game natively:
 
 If you also own the **Japanese release** (SLPM-65324), you can hear its voice recordings with the English text:
 
-1. Install Python 3 and numpy (`py -m pip install numpy` in a command prompt).
+1. Install Python 3 and numpy (`py -m pip install -r requirements.txt` in a command prompt, in the repository folder).
 2. In the launcher (after unpacking the European disc), press **Japanese voices...** and pick the Japanese `.iso`.
    It copies the Japanese voice data next to your game files and matches each English line to its Japanese
    recording (a few minutes).

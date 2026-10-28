@@ -1,0 +1,6 @@
+# What pip can install: python -m pip install -r requirements.txt
+# Git, the C++ compiler and (Linux) the system libraries can't come from pip: see README.md.
+numpy  # tools/ghs_jp_voice.py: Japanese voices
+# Linux build tools (tools/setup.sh); on Windows they come with Visual Studio.
+cmake>=3.21; sys_platform == "linux"
+ninja; sys_platform == "linux"
