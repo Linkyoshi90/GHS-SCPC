@@ -118,21 +118,26 @@ def build():
             else:
                 print("skipped", where)
         print("mod", mod)
-    changed = 0
-    for entry, fns in ops.items():
-        def run(d, fns=fns):
+    changed = []
+    def runner(fns):
+        def run(d):
+            old = d
             for where, fn in fns:
                 try:
                     d = fn(d)
                 except ValueError as e:
                     raise SystemExit("%s\nnothing written" % (e if str(e).startswith(where) else "%s: %s" % (where, e)))
+            if d != old:
+                changed.append(fns)
             return d
-        try:
-            new = ghsarc.edit(data, tuple(entry.split("/")), run)
-        except KeyError:
-            raise SystemExit("%s: FILE.STM has no entry %s\nnothing written" % (fns[0][0], entry))
-        changed += new is not data
-        data = new
+        return run
+    try:
+        data = ghsarc.edit(data, {tuple(entry.split("/")): runner(fns) for entry, fns in ops.items()})
+    except KeyError as e:
+        bad = e.args[0]
+        where = next(fns[0][0] for entry, fns in ops.items() if entry == bad or entry.startswith(bad + "/"))
+        raise SystemExit("%s: FILE.STM has no entry %s\nnothing written" % (where, bad))
+    changed = len(changed)
     with open(ghsarc.GAME_FILE_STM + ".tmp", "wb") as f:
         f.write(data)
     try:

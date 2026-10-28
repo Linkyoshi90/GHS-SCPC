@@ -167,7 +167,13 @@ on, in name order (a later mod wins); without mods it puts the original back. In
 
 - **Included:** `mods\pc_text`, English text without PS2 memory card and console wording.
 - **The player's textures:** `044.slid.bin` (boy) and `046.slid.bin` (girl). For the boy: `tex0` shirt and trousers,
-  `tex1` face skin, `tex2` the flat colours of hair, eyes and more, `tex3` sleeves.
+  `tex1` face skin, `tex2` the flat colours of hair, eyes and more (the hair is the brown swatch at x 24-31, y 28-31),
+  `tex3` sleeves.
+- **Guests:** `170\<2k>.slid.bin` holds the textures and `170\<2k+1>.slid` the model of the guest in actor slot k+1
+  (Gregory `000`/`001`, James `034`/`035`). A model's meshes (`000\*.bin`) can be reshaped with `tools\ghsmesh.py`
+  as long as each keeps its batches and vertex counts; the skeleton and animations stay. Example:
+  `py tools\mod_james_creeper.py` writes `mods\james the creeper` (James as a creeper). Guests posed as part of a
+  room (such as Jack Ketch chained in the dungeon) are the room's own models and keep their shape.
 
 ## Where things are
 

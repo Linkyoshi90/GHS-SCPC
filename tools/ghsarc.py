@@ -248,17 +248,27 @@ def get(data, path):
     return data
 
 
-def edit(data, path, fn):
-    """data with the entry at path replaced by fn(entry); only the archives on the way are rebuilt."""
-    if not path:
-        return fn(data)
-    kids, k, compressed = _child(data, path[0], path)
-    inner = slid(kids[k])[0] if compressed else kids[k]
-    new = edit(inner, path[1:], fn)
-    if new == inner:
+def edit(data, edits, prefix=()):
+    """data with each entry of edits ({path: fn}) replaced by fn(entry); only the archives on the way are rebuilt,
+    each (and each SLID block) once. KeyError(path) for a path that is not in data."""
+    if () in edits:
+        data = edits[()](data)
+    groups = {}
+    for path, fn in edits.items():
+        if path:
+            groups.setdefault(path[0], {})[path[1:]] = fn
+    if not groups:
         return data
-    kids[k] = slid_compress(new) if compressed else new
-    return build_archive(kids)
+    kids, changed = None, False
+    for name, sub in groups.items():
+        kids_, k, compressed = _child(data, name, prefix + (name,))
+        kids = kids or kids_
+        inner = slid(kids[k])[0] if compressed else kids[k]
+        new = edit(inner, sub, prefix + (name,))
+        if new != inner:
+            kids[k] = slid_compress(new) if compressed else new
+            changed = True
+    return build_archive(kids) if changed else data
 
 
 if __name__ == "__main__":
