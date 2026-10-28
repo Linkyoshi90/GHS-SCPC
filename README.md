@@ -223,6 +223,9 @@ Linux: build and play natively with `tools/setup.sh` and `tools/launch.sh` (see 
 - **Game data mods**: `py tools\ghsarc.py unpack` unpacks `game\FILE.STM` into `mods\FILE.STM\` (one file or folder per
   entry; the English text is in `033.slid`). Edit files there, then `py tools\ghsarc.py repack mods\FILE.STM game\FILE.STM`
   (about a minute; the original is kept as `game\FILE.STM.orig`, copy it back to undo).
+- **PC text** (English, `textpatch\pc_english.txt`): no PS2 memory card or console wording, "Dush" fixed. After the
+  unpack: `py tools\ghs_textpatch.py textpatch\pc_english.txt`, then the repack above. Menu messages are found at
+  fixed offsets, so a replacement may be shorter than the original text but not longer (the script checks).
 - Never commit anything from `game\`, `mods\`, `PS2Recomp\` or the generated parts of `recomp\` (the `.gitignore` keeps them out).
 
 ## Credits
