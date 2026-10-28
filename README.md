@@ -24,6 +24,7 @@ Not affiliated with or endorsed by the game's publisher or rights holders. All t
 - [Features](#features)
 - [Optional: Japanese voices](#optional-japanese-voices)
 - [Optional: online Hell's Roulette](#optional-online-hells-roulette)
+- [Mods](#mods)
 - [Where things are](#where-things-are)
 - [Updating](#updating)
 - [Troubleshooting](#troubleshooting)
@@ -150,6 +151,24 @@ Two players can play the roulette board game over the network. One player runs t
 `powershell -ExecutionPolicy Bypass -File tools\launch.ps1 -Online <server>:7790 -Room <name>` and pick Hell's
 Roulette for two players on the title screen. The first player in a room plays blue, the second red.
 
+## Mods
+
+Mods go into the `mods` folder, each as a folder or a `.zip`. In the game, **F2 → Mods** lists them: switch them on
+or off, then press **Restart** (enabled when something changed, also when a mod's files changed): the game closes,
+builds the mods in and starts again (needs Python 3; progress since your last save is lost). Without the game:
+`py tools\ghsmod.py` builds `game\FILE.STM` from the original (kept as `game\FILE.STM.orig`) and every mod that is
+on, in name order (a later mod wins); without mods it puts the original back. Inside a mod:
+
+| File | What it does |
+|---|---|
+| `FILE.STM\<entry>.tex<N>.png` | Replaces texture N of an entry. `py tools\ghsmod.py export <entry> <mod>` writes an entry's textures there to paint over (keep the size); colours are fitted to the texture's 16 or 256 colours when you build. |
+| `*.txt` | Text replacements, as in `mods\pc_text\pc_english.txt`. New text may be shorter than the old, not longer. |
+| `FILE.STM\<entry>` | Replaces a whole entry (names as `py tools\ghsarc.py unpack` writes them into `unpacked\`). |
+
+- **Included:** `mods\pc_text`, English text without PS2 memory card and console wording.
+- **The player's textures:** `044.slid.bin` (boy) and `046.slid.bin` (girl). For the boy: `tex0` shirt and trousers,
+  `tex1` face skin, `tex2` the flat colours of hair, eyes and more, `tex3` sleeves.
+
 ## Where things are
 
 | Path | What |
@@ -159,6 +178,8 @@ Roulette for two players on the title screen. The first player in a room plays b
 | `game\` | Your unpacked game files *(made by the launcher; never share them)*. |
 | `PS2Recomp\` | The recompiler and runtime, cloned and patched by the build; the port itself is `PS2Recomp\out\build\ps2xRuntime\Release\ps2EntryRunner.exe`. |
 | `recomp\memcards\` | Your saves. |
+| `mods\` | Mods ([Mods](#mods)); only `mods\pc_text` belongs to the repository. `mods\disabled.txt`: the ones switched off. |
+| `recomp\mods.log` | The last mod build started from the game's Mods tab. |
 | `recomp\live.log`, `recomp\live.err.log` | The last session's logs (the one before is kept as `live.prev.*`). |
 | `recomp\recomp.log`, `recomp\runner-build.log` | Build logs. |
 | `overrides\` | The port's own game fixes and features (C++), compiled into the game. |
@@ -220,13 +241,10 @@ Linux: build and play natively with `tools/setup.sh` and `tools/launch.sh` (see 
 - **Vulkan**: with the [Vulkan SDK](https://vulkan.lunarg.com/) installed, the build also compiles the GPU graphics for
   Vulkan 1.2 (the path the Linux build uses). The launcher's **Graphics** button (under the steps) picks Direct3D 11,
   Vulkan or the CPU for the next start; `tools\launch.ps1` follows it (`-Vulkan` / `-Cpu` override it).
-- **Game data mods**: `py tools\ghsarc.py unpack` unpacks `game\FILE.STM` into `mods\FILE.STM\` (one file or folder per
-  entry; the English text is in `033.slid`). Edit files there, then `py tools\ghsarc.py repack mods\FILE.STM game\FILE.STM`
-  (about a minute; the original is kept as `game\FILE.STM.orig`, copy it back to undo).
-- **PC text** (English, `textpatch\pc_english.txt`): no PS2 memory card or console wording, "Dush" fixed. After the
-  unpack: `py tools\ghs_textpatch.py textpatch\pc_english.txt`, then the repack above. Menu messages are found at
-  fixed offsets, so a replacement may be shorter than the original text but not longer (the script checks).
-- Never commit anything from `game\`, `mods\`, `PS2Recomp\` or the generated parts of `recomp\` (the `.gitignore` keeps them out).
+- **Game data**: `py tools\ghsarc.py unpack` unpacks `game\FILE.STM` into `unpacked\FILE.STM\` to look around
+  (English text in `033.slid`; textures are the entries starting with `08`/`09 00 00 00`, see `tools\ghstex.py`).
+  Mods are built with `tools\ghsmod.py` ([Mods](#mods)).
+- Never commit anything from `game\`, `unpacked\`, `mods\` (except `mods\pc_text`), `PS2Recomp\` or the generated parts of `recomp\` (the `.gitignore` keeps them out).
 
 ## Credits
 

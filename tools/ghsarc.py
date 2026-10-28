@@ -10,10 +10,11 @@ SLID block: 'SLID', u32 total size (incl. this 16-byte header), u32 uncompressed
 
 Unpacked folder (one name per entry, numbered in table order): NNN.bin raw data, NNN\\ nested archive,
 NNN.slid.bin / NNN.slid\\ the same SLID-compressed. Archives that would not rebuild byte for byte stay one file.
-  python tools\\ghsarc.py unpack [FILE.STM] [folder]       default: game\\FILE.STM -> mods\\FILE.STM
+  python tools\\ghsarc.py unpack [FILE.STM] [folder]       default: game\\FILE.STM -> unpacked\\FILE.STM
   python tools\\ghsarc.py repack <folder> <out> [base]     base (default game\\FILE.STM): untouched SLID blocks are
                                                           copied from it instead of compressed again
 Repacking over game\\FILE.STM keeps the original as game\\FILE.STM.orig (copy it back to undo the mod).
+To install mods, use tools\\ghsmod.py instead: it builds game\\FILE.STM from the original and every mod in mods\\.
 """
 import os
 import shutil
@@ -226,11 +227,45 @@ def pack(path, base=None):
     return slid_compress(data)
 
 
+def _child(data, name, path):
+    """(entries, index, compressed) of the entry called name (as unpack() names it) in archive data."""
+    num, _, rest = name.partition(".")
+    ents = as_archive(data)
+    if not num.isdigit() or rest not in ("", "bin", "slid", "slid.bin") or ents is None or int(num) >= len(ents):
+        raise KeyError("/".join(path))
+    kids = [data[off:off + size] for off, size, last in ents]
+    compressed = rest.startswith("slid")
+    if compressed != (kids[int(num)][:4] == b"SLID"):
+        raise KeyError("/".join(path))
+    return kids, int(num), compressed
+
+
+def get(data, path):
+    """The entry at path (names as unpack() writes them, e.g. ("033.slid", "070.bin")), decompressed."""
+    for name in path:
+        kids, k, compressed = _child(data, name, path)
+        data = slid(kids[k])[0] if compressed else kids[k]
+    return data
+
+
+def edit(data, path, fn):
+    """data with the entry at path replaced by fn(entry); only the archives on the way are rebuilt."""
+    if not path:
+        return fn(data)
+    kids, k, compressed = _child(data, path[0], path)
+    inner = slid(kids[k])[0] if compressed else kids[k]
+    new = edit(inner, path[1:], fn)
+    if new == inner:
+        return data
+    kids[k] = slid_compress(new) if compressed else new
+    return build_archive(kids)
+
+
 if __name__ == "__main__":
     cmd, args = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("", [])
     if cmd == "unpack" and len(args) <= 2:
         src = args[0] if args else GAME_FILE_STM
-        dst = args[1] if len(args) > 1 else os.path.join(ROOT, "mods", "FILE.STM")
+        dst = args[1] if len(args) > 1 else os.path.join(ROOT, "unpacked", "FILE.STM")
         if os.path.exists(dst) and os.listdir(dst):
             raise SystemExit(dst + " is not empty: move or delete it first (it may hold your changes)")
         os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)

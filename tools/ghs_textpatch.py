@@ -1,17 +1,14 @@
-"""Applies a text patch list to the unpacked FILE.STM (tools\\ghsarc.py unpack), in place; repack afterwards.
-  python tools\\ghs_textpatch.py textpatch\\pc_english.txt [mods\\FILE.STM]
+"""Text replacement lists for mods (a mod's *.txt files; tools\\ghsmod.py applies them).
 
-Patch list: one replacement per line, tab separated: text entry (path in the unpacked folder), old text, new text,
-with Python escapes (\\n line break, \\x1b colour codes, \\\\), Latin-1. Lines starting with # are comments. Each
-replacement applies to every message of its entry, in list order. Nothing is written unless every replacement
-matches (a miss means other game text, or the list is applied already) and every message still fits.
+One replacement per line, tab separated: text entry (path in FILE.STM as tools\\ghsarc.py unpack names it), old text,
+new text, with Python escapes (\\n line break, \\x1b colour codes, \\\\), Latin-1. Lines starting with # are comments.
+Each replacement applies to every message of its entry, in list order; one that matches nothing is an error (other
+game text, or the list does not fit this release).
 Text entries: messages of 8-bit text, each ended by a 16-bit zero (after one zero byte if the length is odd). The
 game finds a message at its fixed byte offset (not in any table in FILE.STM or the ELF; tested: shorter messages
 that moved the later ones showed those cut off), so a message keeps its slot: shorter text is zero-filled, longer
-text is refused.
+text is an error.
 """
-import os
-import sys
 
 
 def slots(data):
@@ -31,41 +28,34 @@ def unescape(text):
     return text.encode("latin-1").decode("unicode_escape").encode("latin-1")
 
 
-if __name__ == "__main__":
-    if len(sys.argv) not in (2, 3):
-        raise SystemExit(__doc__)
-    root = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mods", "FILE.STM")
-    entries, errors = {}, []
-    with open(sys.argv[1], encoding="utf-8") as f:
-        for n, line in enumerate(f, 1):
-            line = line.rstrip("\r\n")
-            if not line.strip() or line.startswith("#"):
-                continue
-            entry, old, new = line.split("\t")
-            if entry not in entries:
-                with open(os.path.join(root, entry), "rb") as e:
-                    data = e.read()
-                entries[entry] = (data, [s for a, b, s in slots(data)])
-            old, new = unescape(old), unescape(new)
-            data, texts = entries[entry]
-            hits = sum(t.count(old) for t in texts)
-            if not hits:
-                errors.append("line %d: %r not found in %s" % (n, old.decode("latin-1"), entry))
-            entries[entry] = (data, [t.replace(old, new) for t in texts])
-            print("line %d: %s, %d x" % (n, entry, hits))
+def parse(text, name):
+    """{entry path: [(where, old, new)]} from a replacement list."""
     out = {}
-    for entry, (data, texts) in entries.items():
-        buf = bytearray(data)
-        for (a, b, s), t in zip(slots(data), texts):
-            if t != s:
-                if len(t) + len(t) % 2 + 2 > b - a:
-                    errors.append("%s: %r is %d bytes longer than the original message" % (entry, t.decode("latin-1"), len(t) + len(t) % 2 + 2 - (b - a)))
-                    continue
-                buf[a:b] = t + bytes(b - a - len(t))
-        out[entry] = buf
+    for n, line in enumerate(text.splitlines(), 1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) != 3:
+            raise ValueError("%s line %d: expected entry<TAB>old<TAB>new" % (name, n))
+        out.setdefault(parts[0], []).append(("%s line %d" % (name, n), unescape(parts[1]), unescape(parts[2])))
+    return out
+
+
+def apply(data, replacements):
+    """data with the replacements made, each message in its own slot; ValueError lists every problem."""
+    texts, errors = [s for a, b, s in slots(data)], []
+    for where, old, new in replacements:
+        if not any(old in t for t in texts):
+            errors.append("%s: %r not found" % (where, old.decode("latin-1")))
+        texts = [t.replace(old, new) for t in texts]
+    buf = bytearray(data)
+    for (a, b, s), t in zip(slots(data), texts):
+        if t == s:
+            continue
+        if len(t) + len(t) % 2 + 2 > b - a:
+            errors.append("%r is %d bytes longer than the original message" % (t.decode("latin-1"), len(t) + len(t) % 2 + 2 - (b - a)))
+            continue
+        buf[a:b] = t + bytes(b - a - len(t))
     if errors:
-        raise SystemExit("\n".join(errors) + "\nnothing written")
-    for entry, buf in out.items():
-        with open(os.path.join(root, entry), "wb") as e:
-            e.write(buf)
-    print("patched", len(out), "entries in", root, "- now: python tools\\ghsarc.py repack", root, "game\\FILE.STM")
+        raise ValueError("\n".join(errors))
+    return bytes(buf)

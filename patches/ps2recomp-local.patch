@@ -2386,7 +2386,7 @@ index 509fd07..9ea83af 100644
  
      std::string CodeGenerator::translateVU_VMTIR(const Instruction &inst)
 diff --git a/ps2xRuntime/CMakeLists.txt b/ps2xRuntime/CMakeLists.txt
-index 589d768..94c7406 100644
+index 589d768..26c822d 100644
 --- a/ps2xRuntime/CMakeLists.txt
 +++ b/ps2xRuntime/CMakeLists.txt
 @@ -383,12 +383,16 @@ add_library(ps2_runtime STATIC
@@ -2477,7 +2477,15 @@ index 589d768..94c7406 100644
  if(PS2X_ENABLE_RUNNER_UNITY_BUILD)
      set_target_properties(ps2EntryRunner PROPERTIES
          UNITY_BUILD ON
-@@ -576,7 +637,6 @@ endif()
+@@ -515,6 +576,7 @@ target_link_libraries(ps2EntryRunner
+ if(PS2X_ENABLE_DEBUG_UI AND NOT PS2X_IS_VITA AND NOT PS2X_IS_ANDROID)
+     target_sources(ps2EntryRunner PRIVATE
+         src/lib/ps2_debug_panel.cpp
++        src/lib/ghs_mods.cpp
+     )
+     target_link_libraries(ps2EntryRunner PRIVATE rlImGui imgui)
+     target_compile_definitions(ps2EntryRunner PRIVATE PS2X_ENABLE_DEBUG_UI=1)
+@@ -576,7 +638,6 @@ endif()
  if(MSVC)
      target_link_options(ps2EntryRunner PRIVATE "/FORCE:MULTIPLE")
  endif()
@@ -6163,6 +6171,252 @@ index 0000000..c1c936c
 +const char *ghsKeyName(int key);         // the key's label on the current keyboard layout
 +const char *ghsPadButtonName(int button); // Xbox / PlayStation names
 +void ghsResetKeys();                      // keyboard and controller defaults
+diff --git a/ps2xRuntime/src/lib/ghs_mods.cpp b/ps2xRuntime/src/lib/ghs_mods.cpp
+new file mode 100644
+index 0000000..6409722
+--- /dev/null
++++ b/ps2xRuntime/src/lib/ghs_mods.cpp
+@@ -0,0 +1,240 @@
++// GHS: the Mods tab of the settings window (F2, ps2_debug_panel.cpp). Mods are folders or .zip files in ..\mods (the
++// working directory is game\); tools\ghsmod.py builds game\FILE.STM from the original and the enabled mods and lists
++// those in FILE.STM.mods (name, files, bytes). Switching a mod writes mods\disabled.txt. Restart is enabled while the
++// wanted mods differ from the built ones: it starts "ghsmod.py restart" (Python 3: py -3, else python), which waits
++// for the game to close, builds and starts it again. The game closes only once the helper has written
++// recomp\mods.log, so it stays open when Python is missing. Windows; elsewhere python3 through posix_spawnp.
++#ifdef _WIN32
++#define WIN32_LEAN_AND_MEAN
++#define NOMINMAX
++#include <windows.h>
++#include <shellapi.h>
++#pragma comment(lib, "shell32.lib")
++#else
++#include <spawn.h>
++#include <unistd.h>
++extern char **environ;
++#endif
++#include "imgui.h"
++
++#include <algorithm>
++#include <cctype>
++#include <chrono>
++#include <cstdint>
++#include <filesystem>
++#include <fstream>
++#include <iterator>
++#include <sstream>
++#include <string>
++#include <vector>
++
++namespace
++{
++    namespace fs = std::filesystem;
++
++    struct Mod
++    {
++        std::string name;
++        bool on = true;
++        std::string stamp; // "name\tfiles\tbytes" as ghsmod.py writes it into FILE.STM.mods
++    };
++
++    fs::path root() { return fs::current_path().parent_path(); }
++
++    std::string readFile(const fs::path &p)
++    {
++        std::ifstream f(p, std::ios::binary);
++        std::stringstream s;
++        s << f.rdbuf();
++        return s.str();
++    }
++
++    std::vector<std::string> lines(const std::string &text)
++    {
++        std::vector<std::string> out;
++        std::stringstream s(text);
++        for (std::string line; std::getline(s, line);)
++        {
++            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
++                line.pop_back();
++            if (!line.empty())
++                out.push_back(line);
++        }
++        return out;
++    }
++
++    std::string name8(const fs::path &p)
++    {
++        const std::u8string s = p.filename().u8string();
++        return std::string(s.begin(), s.end());
++    }
++
++    std::vector<Mod> scan()
++    {
++        std::vector<Mod> out;
++        std::error_code ec;
++        const std::vector<std::string> disabled = lines(readFile(root() / "mods" / "disabled.txt"));
++        for (const auto &e : fs::directory_iterator(root() / "mods", ec))
++        {
++            std::string ext = e.path().extension().string();
++            for (char &c : ext)
++                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++            const bool dir = e.is_directory(ec), zip = !dir && ext == ".zip";
++            if (!dir && !zip)
++                continue;
++            uint64_t files = 0, bytes = 0;
++            if (dir)
++            {
++                for (const auto &f : fs::recursive_directory_iterator(e.path(), ec))
++                    if (f.is_regular_file(ec))
++                    {
++                        ++files;
++                        bytes += f.file_size(ec);
++                    }
++            }
++            else
++            {
++                files = 1;
++                bytes = e.file_size(ec);
++            }
++            Mod m;
++            m.name = name8(e.path());
++            m.on = std::find(disabled.begin(), disabled.end(), m.name) == disabled.end();
++            m.stamp = m.name + "\t" + std::to_string(files) + "\t" + std::to_string(bytes);
++            out.push_back(m);
++        }
++        std::sort(out.begin(), out.end(), [](const Mod &a, const Mod &b) { return a.name < b.name; }); // as Python's sorted()
++        return out;
++    }
++
++    void saveDisabled(const std::vector<Mod> &mods)
++    {
++        std::ofstream f(root() / "mods" / "disabled.txt", std::ios::binary);
++        for (const Mod &m : mods)
++            if (!m.on)
++                f << m.name << "\n";
++    }
++
++    // Starts "ghsmod.py restart <pid> <this program> <its arguments>"; false when no Python could be started.
++    bool startRestartHelper()
++    {
++        const fs::path script = root() / "tools" / "ghsmod.py";
++#ifdef _WIN32
++        wchar_t exe[MAX_PATH * 4];
++        GetModuleFileNameW(nullptr, exe, static_cast<DWORD>(std::size(exe)));
++        int argc = 0;
++        LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
++        std::wstring tail = L" \"" + script.wstring() + L"\" restart " + std::to_wstring(GetCurrentProcessId()) + L" \"" + exe + L"\"";
++        for (int i = 1; argv && i < argc; ++i)
++            tail += L" \"" + std::wstring(argv[i]) + L"\"";
++        LocalFree(argv);
++        for (const wchar_t *python : {L"py -3", L"python"})
++        {
++            for (const DWORD flags : {DWORD(CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB), DWORD(CREATE_NO_WINDOW)})
++            {
++                std::wstring cmd = python + tail;
++                STARTUPINFOW si{sizeof(si)};
++                PROCESS_INFORMATION pi{};
++                if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, flags, nullptr, nullptr, &si, &pi))
++                {
++                    CloseHandle(pi.hThread);
++                    CloseHandle(pi.hProcess);
++                    return true;
++                }
++            }
++        }
++        return false;
++#else
++        std::vector<std::string> args = {"python3", script.string(), "restart", std::to_string(getpid())};
++        const std::string cmdline = readFile("/proc/self/cmdline"); // this program and its arguments, NUL separated
++        for (size_t i = 0, j; i < cmdline.size(); i = j + 1)
++        {
++            j = cmdline.find('\0', i);
++            if (j == std::string::npos)
++                j = cmdline.size();
++            args.push_back(i == 0 ? fs::read_symlink("/proc/self/exe").string() : cmdline.substr(i, j - i));
++        }
++        std::vector<char *> argv;
++        for (std::string &a : args)
++            argv.push_back(a.data());
++        argv.push_back(nullptr);
++        pid_t pid;
++        return posix_spawnp(&pid, "python3", nullptr, nullptr, argv.data(), environ) == 0;
++#endif
++    }
++}
++
++// Returns true once the game should close for the restart.
++bool ghsDrawModsTab()
++{
++    using clock = std::chrono::steady_clock;
++    static std::vector<Mod> s_mods;
++    static std::vector<std::string> s_built;
++    static std::string s_log;
++    static clock::time_point s_nextScan{};
++    static enum { Idle, Waiting, Failed } s_restart = Idle;
++    static clock::time_point s_restartAt{};
++    if (clock::now() >= s_nextScan) // a folder walk per frame would be wasteful; mods change rarely
++    {
++        s_mods = scan();
++        s_built = lines(readFile("FILE.STM.mods"));
++        s_log = readFile(root() / "recomp" / "mods.log");
++        s_nextScan = clock::now() + std::chrono::seconds(1);
++    }
++
++    std::vector<std::string> wanted;
++    for (const Mod &m : s_mods)
++        if (m.on)
++            wanted.push_back(m.stamp);
++    const bool pending = wanted != s_built;
++
++    if (s_mods.empty())
++        ImGui::TextDisabled("No mods. Put mod folders or .zip files into the mods folder\n(next to the game folder); see the README, \"Mods\".");
++    for (Mod &m : s_mods)
++    {
++        if (ImGui::Checkbox(m.name.c_str(), &m.on))
++        {
++            saveDisabled(s_mods);
++            s_nextScan = {};
++        }
++        const bool built = std::find(s_built.begin(), s_built.end(), m.stamp) != s_built.end();
++        bool builtByName = false;
++        for (const std::string &b : s_built)
++            builtByName |= b.compare(0, m.name.size() + 1, m.name + "\t") == 0;
++        ImGui::SameLine();
++        if (m.on && built)
++            ImGui::TextDisabled("active");
++        else if (m.on)
++            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), builtByName ? "changed: rebuilt at restart" : "on after restart");
++        else if (builtByName)
++            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "off after restart");
++        else
++            ImGui::TextDisabled("off");
++    }
++
++    ImGui::Separator();
++    if (s_restart == Waiting)
++    {
++        if (fs::exists(root() / "recomp" / "mods.log"))
++            return true;
++        if (clock::now() - s_restartAt > std::chrono::seconds(10))
++            s_restart = Failed;
++    }
++    ImGui::BeginDisabled(!pending || s_restart == Waiting);
++    if (ImGui::Button(s_restart == Waiting ? "Restarting ..." : "Restart"))
++    {
++        std::error_code ec;
++        fs::remove(root() / "recomp" / "mods.log", ec);
++        s_restart = startRestartHelper() ? Waiting : Failed;
++        s_restartAt = clock::now();
++    }
++    ImGui::EndDisabled();
++    ImGui::SameLine();
++    ImGui::TextDisabled(pending ? "Builds the mods and starts the game again;\nprogress since your last save is lost."
++                                : "The mods shown as active are in the game.");
++    if (s_restart == Failed)
++        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Python 3 did not start (needed to build the mods). Install it from\npython.org, or run: py tools\\ghsmod.py, then start the game again.");
++    else if (pending && (s_log.find("build failed") != std::string::npos || s_log.find("Traceback") != std::string::npos))
++        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "The last build failed (recomp\\mods.log):\n%s", s_log.c_str());
++    return false;
++}
 diff --git a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
 index f0ad507..e35fe44 100644
 --- a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
@@ -16459,7 +16713,7 @@ index a8f9fa8..f114e1c 100644
  
  
 diff --git a/ps2xRuntime/src/lib/ps2_debug_panel.cpp b/ps2xRuntime/src/lib/ps2_debug_panel.cpp
-index c9aa2c6..bc3c57b 100644
+index c9aa2c6..c145355 100644
 --- a/ps2xRuntime/src/lib/ps2_debug_panel.cpp
 +++ b/ps2xRuntime/src/lib/ps2_debug_panel.cpp
 @@ -9,6 +9,8 @@
@@ -17045,7 +17299,7 @@ index c9aa2c6..bc3c57b 100644
  void PS2DebugPanel::draw(PS2Runtime &runtime)
  {
  #if defined(PS2X_ENABLE_DEBUG_UI) && !defined(PLATFORM_VITA)
-@@ -2211,13 +2758,154 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
+@@ -2211,13 +2758,161 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
          toggleVisible();
      }
  
@@ -17187,6 +17441,13 @@ index c9aa2c6..bc3c57b 100644
 +                ImGui::EndTabItem();
 +            }
 +            s_openControls = false;
++            if (ImGui::BeginTabItem("Mods"))
++            {
++                bool ghsDrawModsTab(); // ghs_mods.cpp: true once the restart helper runs
++                if (ghsDrawModsTab())
++                    runtime.requestStop(); // the main loop ends, the helper builds and starts the game again
++                ImGui::EndTabItem();
++            }
 +            ImGui::EndTabBar();
 +        }
 +        ImGui::End();
@@ -17201,7 +17462,7 @@ index c9aa2c6..bc3c57b 100644
      ImGui::SetNextWindowSize(ImVec2(780.0f, 620.0f), ImGuiCond_FirstUseEver);
      if (ImGui::Begin("Runtime Debugger", &m_visible, ImGuiWindowFlags_MenuBar))
      {
-@@ -2227,6 +2915,18 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
+@@ -2227,6 +2922,18 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
              ImGui::EndMenuBar();
          }
  

@@ -1,6 +1,5 @@
-# English text for the PC port: no PS2 memory card and console wording; "Dush" fixed (a button list the EU options never show).
-#   python tools\ghs_textpatch.py textpatch\pc_english.txt   (on the folder from: python tools\ghsarc.py unpack)
-#   python tools\ghsarc.py repack mods\FILE.STM game\FILE.STM
+# PC text (English): no PS2 memory card and console wording; "Dush" fixed (a button list the EU options never show).
+#   Applied by: python tools\ghsmod.py (builds game\FILE.STM from the original and every mod in mods\)
 # entry	old text	new text (tab separated; \n = line break)
 # 033.slid\070.bin: memory card screens (load, save, format)
 033.slid/070.bin	Do not remove Memory Card (PS2),\nreset,or switch off the console,ribbit.	Do not close the game,ribbit.

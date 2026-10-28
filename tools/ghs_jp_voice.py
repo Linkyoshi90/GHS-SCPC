@@ -96,7 +96,8 @@ def jp_tables(jp):
 
 def eu_text():
     """English text resource 33: {slot: leaf bytes}."""
-    raw, top = ghsarc.load_file_stm(os.path.join(GAME, 'FILE.STM'))
+    orig = os.path.join(GAME, 'FILE.STM.orig')  # the game's own text even when mods change it (tools\ghsmod.py)
+    raw, top = ghsarc.load_file_stm(orig if os.path.exists(orig) else os.path.join(GAME, 'FILE.STM'))
     off, size = top[33]
     data = raw[off:off + size]
     if data[:4] == b'SLID':
