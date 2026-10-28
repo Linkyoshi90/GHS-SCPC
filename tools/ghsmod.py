@@ -77,7 +77,18 @@ def texture_op(k, blob, where):
     return op
 
 
+def game_running():
+    """Whether a game runs: it reads FILE.STM by offsets it loaded at start, so the file must not change under it."""
+    if os.name != "nt":
+        return False  # ponytail: the Linux build has no check yet; close the game before building
+    import subprocess
+    out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq ps2EntryRunner.exe", "/NH"], capture_output=True, text=True).stdout
+    return "ps2EntryRunner.exe" in out
+
+
 def build():
+    if game_running():
+        raise SystemExit("the game is running: close it first (or use F2 -> Mods -> Restart in the game)\nnothing written")
     if not os.path.exists(ORIG):
         shutil.copyfile(ghsarc.GAME_FILE_STM, ORIG)
     with open(ORIG, "rb") as f:
@@ -124,7 +135,11 @@ def build():
         data = new
     with open(ghsarc.GAME_FILE_STM + ".tmp", "wb") as f:
         f.write(data)
-    os.replace(ghsarc.GAME_FILE_STM + ".tmp", ghsarc.GAME_FILE_STM)
+    try:
+        os.replace(ghsarc.GAME_FILE_STM + ".tmp", ghsarc.GAME_FILE_STM)
+    except PermissionError:
+        os.remove(ghsarc.GAME_FILE_STM + ".tmp")
+        raise SystemExit("game\\FILE.STM is in use: close the game first (or use F2 -> Mods -> Restart in the game)\nnothing written")
     with open(BUILT, "w", encoding="utf-8", newline="\n") as f:
         f.writelines("%s\t%d\t%d\n" % m for m in mods)
     print("built", ghsarc.GAME_FILE_STM, "from", len(names), "mods,", changed, "entries changed")
