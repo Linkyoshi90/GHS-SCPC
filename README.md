@@ -220,7 +220,10 @@ Linux: build and play natively with `tools/setup.sh` and `tools/launch.sh` (see 
 - **Vulkan**: with the [Vulkan SDK](https://vulkan.lunarg.com/) installed, the build also compiles the GPU graphics for
   Vulkan 1.2 (the path the Linux build uses). The launcher's **Graphics** button (under the steps) picks Direct3D 11,
   Vulkan or the CPU for the next start; `tools\launch.ps1` follows it (`-Vulkan` / `-Cpu` override it).
-- Never commit anything from `game\`, `PS2Recomp\` or the generated parts of `recomp\` (the `.gitignore` keeps them out).
+- **Game data mods**: `py tools\ghsarc.py unpack` unpacks `game\FILE.STM` into `mods\FILE.STM\` (one file or folder per
+  entry; the English text is in `033.slid`). Edit files there, then `py tools\ghsarc.py repack mods\FILE.STM game\FILE.STM`
+  (about a minute; the original is kept as `game\FILE.STM.orig`, copy it back to undo).
+- Never commit anything from `game\`, `mods\`, `PS2Recomp\` or the generated parts of `recomp\` (the `.gitignore` keeps them out).
 
 ## Credits
 

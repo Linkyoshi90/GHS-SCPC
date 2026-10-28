@@ -2,6 +2,8 @@
 # The files unpacked from your disc (the launcher writes them here), the Japanese voice pool and maps made from them
 game/
 game_jp/
+# Game data unpacked for mods (tools\ghsarc.py unpack)
+mods/
 # Disc images
 *.iso
 *.ISO
