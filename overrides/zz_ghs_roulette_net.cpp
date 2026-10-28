@@ -1,5 +1,5 @@
 // Gregory Horror Show: online two-player Hell's Roulette (the title screen's mode), client of tools\roulette_server.py.
-// GHS_NET=<host>:<port> and GHS_ROOM=<name> (tools\launch.ps1 -Online / -Room) turn it on; the first player in a room
+// GHS_NET=<host>:<port> and GHS_ROOM=<name> (tools\launch.ps1 -Online / -Room, tools/launch.sh --online / --room) turn it on; the first player in a room
 // plays blue, the second red. Both run the game's own two-player mode; a background thread watches EE RAM (README:
 // Two-player Hell's Roulette):
 //  - own turn (turn flag 0x60E2F0 = own seat): the player plays; each spin's number goes to the server, and when the turn
@@ -12,12 +12,19 @@
 #include "game_overrides.h"
 #include "ps2_runtime.h"
 
+#ifdef _WIN32
 #define NOMINMAX // after the runtime's headers, so windows.h's macros only meet this file
 #define WIN32_LEAN_AND_MEAN
 #define NOGDI  // the unity build puts raylib.h after this file: wingdi's Rectangle and winuser's CloseWindow/ShowCursor clash
 #define NOUSER
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#define MSG_NOSIGNAL 0
+#else
+#include <netdb.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 
 #include <chrono>
 #include <cstdio>
@@ -36,6 +43,11 @@ namespace ps2_stubs // Kernel/Stubs/Pad.h (test hooks): what scePadRead returns 
 
 namespace ghs_roulette_net
 {
+#ifndef _WIN32 // POSIX sockets under Winsock's names (in this namespace: the unity build shares the global one)
+    using SOCKET = int;
+    constexpr SOCKET INVALID_SOCKET = -1;
+    inline int closesocket(SOCKET s) { return close(s); }
+#endif
     constexpr uint32_t kPlayers = 0x006D3640u, kPlayerBytes = 0xB0u; // blue, then red
     constexpr uint32_t kSquare = 0x50u, kHealthMax = 0x8Cu;
     constexpr uint32_t kTurn = 0x0060E2F0u;           // wheel object +0x8C: 0 blue's turn, 1 red's
@@ -69,7 +81,7 @@ namespace ghs_roulette_net
     {
         std::lock_guard<std::mutex> lock(g_lock);
         if (g_sock != INVALID_SOCKET)
-            send(g_sock, (line + "\n").c_str(), static_cast<int>(line.size() + 1), 0);
+            send(g_sock, (line + "\n").c_str(), static_cast<int>(line.size() + 1), MSG_NOSIGNAL); // lost server: no SIGPIPE
     }
 
     void heard(const std::string &line)
@@ -91,8 +103,10 @@ namespace ghs_roulette_net
 
     void netThread(std::string host, std::string port, std::string room)
     {
+#ifdef _WIN32
         WSADATA wsa;
         WSAStartup(MAKEWORD(2, 2), &wsa);
+#endif
         for (;; std::this_thread::sleep_for(std::chrono::seconds(3)))
         {
             addrinfo hints{}, *found = nullptr;

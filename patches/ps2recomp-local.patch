@@ -1344,18 +1344,19 @@ index 3d80897..571465e 100644
                  continue;
              if (result == 0u)
 diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
-index e5f63a9..f28da89 100644
+index e5f63a9..d16d072 100644
 --- a/ps2xIOP/src/emulator/iop_emulator.cpp
 +++ b/ps2xIOP/src/emulator/iop_emulator.cpp
-@@ -1,4 +1,7 @@
+@@ -1,4 +1,8 @@
  #include "iop_emulator.h"
 +#include <iostream> // GHS-TRACE
 +#include <chrono> // GHS-TRACE
++#include <cstring> // std::memcpy (gcc)
 +namespace ps2x::iop::detail { void ghsDumpSpu2(); } // GHS-TRACE
  #include "imports/iop_cdvd.h"
  #include "core/iop_cpu.h"
  #include "imports/iop_heaplib.h"
-@@ -18,6 +21,7 @@
+@@ -18,6 +22,7 @@
  #include "iop_emulator_const.h"
  
  #include <algorithm>
@@ -1363,7 +1364,7 @@ index e5f63a9..f28da89 100644
  #include <cctype>
  #include <map>
  #include <optional>
-@@ -237,9 +241,40 @@ namespace ps2x::iop::detail
+@@ -237,9 +242,40 @@ namespace ps2x::iop::detail
              Missing,
          };
  
@@ -1404,7 +1405,7 @@ index e5f63a9..f28da89 100644
              auto setV0 = [&](uint32_t value)
              {
                  cpu.gpr[2] = value;
-@@ -380,7 +415,9 @@ namespace ps2x::iop::detail
+@@ -380,7 +416,9 @@ namespace ps2x::iop::detail
  
              if (const auto import = imports.decode(cpu.pc))
              {
@@ -1414,7 +1415,7 @@ index e5f63a9..f28da89 100644
                  ++totalInstructions;
                  ++totalCycles;
                  if (disposition == ImportDisposition::JumpToGuest)
-@@ -557,7 +594,38 @@ namespace ps2x::iop::detail
+@@ -557,7 +595,38 @@ namespace ps2x::iop::detail
          {
              try
              {
@@ -1453,7 +1454,7 @@ index e5f63a9..f28da89 100644
                  while (totalCycles < target)
                  {
                      servicePendingDmaInterrupts();
-@@ -572,15 +640,19 @@ namespace ps2x::iop::detail
+@@ -572,15 +641,19 @@ namespace ps2x::iop::detail
                          if (!pendingGuestCallbacks.empty())
                              nextWake = std::min(nextWake, pendingGuestCallbacks.begin()->first);
                          nextWake = timrman.nextEventCycle(nextWake);
@@ -1473,7 +1474,7 @@ index e5f63a9..f28da89 100644
              }
              catch (...)
              {
-@@ -588,11 +660,61 @@ namespace ps2x::iop::detail
+@@ -588,11 +661,61 @@ namespace ps2x::iop::detail
              }
          }
  
@@ -1535,7 +1536,7 @@ index e5f63a9..f28da89 100644
              if (!loaded)
              {
                  if (loaded.error == IopImageLoadError::InvalidElf)
-@@ -624,7 +746,10 @@ namespace ps2x::iop::detail
+@@ -624,7 +747,10 @@ namespace ps2x::iop::detail
                      write8(args + argumentSize, 0u);
                  }
              }
@@ -1546,7 +1547,7 @@ index e5f63a9..f28da89 100644
              if (args)
                  freeAllocation(args);
              module.resident = startResult == 0u || startResult == 2u;
-@@ -632,11 +757,13 @@ namespace ps2x::iop::detail
+@@ -632,11 +758,13 @@ namespace ps2x::iop::detail
              result.startResult = static_cast<int32_t>(startResult);
              modules[module.id] = std::move(module);
  
@@ -1561,7 +1562,7 @@ index e5f63a9..f28da89 100644
              log(LogLevel::Info, out.str());
              return result;
          }
-@@ -652,10 +779,43 @@ namespace ps2x::iop::detail
+@@ -652,10 +780,43 @@ namespace ps2x::iop::detail
              return loadImage(std::string(path), image, arguments, argumentSize);
          }
  
@@ -1606,7 +1607,7 @@ index e5f63a9..f28da89 100644
                  return {true, -1, -1};
              std::ostringstream tag;
              tag << "buffer@0x" << std::hex << guestAddress;
-@@ -697,6 +857,7 @@ namespace ps2x::iop::detail
+@@ -697,6 +858,7 @@ namespace ps2x::iop::detail
          std::map<int, Module> modules;
          std::map<int, uint64_t> pendingDmaInterrupts;
          std::multimap<uint64_t, ScheduledGuestCallback> pendingGuestCallbacks;
@@ -1614,7 +1615,7 @@ index e5f63a9..f28da89 100644
          uint32_t nextModuleId = 1;
          uint32_t moduleCursor = kModuleLoadBase;
          uint64_t totalCycles = 0;
-@@ -729,6 +890,11 @@ namespace ps2x::iop::detail
+@@ -729,6 +891,11 @@ namespace ps2x::iop::detail
          return m_impl->loadModule(path, arguments, argumentSize);
      }
  
@@ -1626,7 +1627,7 @@ index e5f63a9..f28da89 100644
      ModuleLoadResult IopEmulator::loadModuleBuffer(uint32_t guestAddress, const void *arguments, uint32_t argumentSize)
      {
          return m_impl->loadModuleBuffer(guestAddress, arguments, argumentSize);
-@@ -745,12 +911,38 @@ namespace ps2x::iop::detail
+@@ -745,12 +912,38 @@ namespace ps2x::iop::detail
          const uint64_t iopCycles = total / 8u;
          m_impl->eeCycleCarry = total % 8u;
          if (iopCycles)
@@ -1666,7 +1667,7 @@ index e5f63a9..f28da89 100644
      }
  
      bool IopEmulator::hasRpcServer(uint32_t sid) const noexcept
-@@ -785,6 +977,26 @@ namespace ps2x::iop::detail
+@@ -785,6 +978,26 @@ namespace ps2x::iop::detail
                 m_impl->memory.writeRam(address, source, size);
      }
  
@@ -2385,7 +2386,7 @@ index 509fd07..9ea83af 100644
  
      std::string CodeGenerator::translateVU_VMTIR(const Instruction &inst)
 diff --git a/ps2xRuntime/CMakeLists.txt b/ps2xRuntime/CMakeLists.txt
-index 589d768..f6b37b4 100644
+index 589d768..94c7406 100644
 --- a/ps2xRuntime/CMakeLists.txt
 +++ b/ps2xRuntime/CMakeLists.txt
 @@ -383,12 +383,16 @@ add_library(ps2_runtime STATIC
@@ -2405,7 +2406,7 @@ index 589d768..f6b37b4 100644
      src/lib/ps2_vif1_interpreter.cpp
      src/lib/vu/ps2_vu1_core.cpp
      src/lib/vu/ps2_vu1_upper.cpp
-@@ -396,6 +400,48 @@ add_library(ps2_runtime STATIC
+@@ -396,6 +400,53 @@ add_library(ps2_runtime STATIC
      src/lib/games_database.cpp
  )
  
@@ -2449,12 +2450,17 @@ index 589d768..f6b37b4 100644
 +    set_source_files_properties(src/lib/vu/ps2_vu1_core.cpp ${VU1_IMAGE_SRC_FILES} PROPERTIES COMPILE_OPTIONS "/bigobj;/arch:AVX2")
 +    # The GS rasterizer's AVX2 lanes (gs_cpu_simd.cpp checks the CPU at run time and the scalar path stays).
 +    set_source_files_properties(src/lib/gs/gs_cpu_simd.cpp PROPERTIES COMPILE_OPTIONS /arch:AVX2)
++elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
++    # GHS: gcc/clang. x86-64-v3 = MSVC's /arch:AVX2 (AVX2, FMA, BMI); no FMA contraction, as MSVC: the VU/GS results
++    # are bit-exact. PUBLIC: the game code includes the same SSE4.1 helpers (ps2_runtime_macros.h).
++    target_compile_options(ps2_runtime PUBLIC -march=x86-64-v3 -ffp-contract=off)
++    target_compile_definitions(ps2_runtime PUBLIC "__forceinline=inline __attribute__((always_inline))")
 +endif()
 +
  if(PS2X_ENABLE_RUNTIME_LOGS)
      target_compile_definitions(ps2_runtime PUBLIC
          PS2_RUNTIME_LOGS=1
-@@ -462,6 +508,16 @@ else()
+@@ -462,6 +513,16 @@ else()
      )
  endif()
  
@@ -2471,7 +2477,7 @@ index 589d768..f6b37b4 100644
  if(PS2X_ENABLE_RUNNER_UNITY_BUILD)
      set_target_properties(ps2EntryRunner PROPERTIES
          UNITY_BUILD ON
-@@ -576,7 +632,6 @@ endif()
+@@ -576,7 +637,6 @@ endif()
  if(MSVC)
      target_link_options(ps2EntryRunner PRIVATE "/FORCE:MULTIPLE")
  endif()
@@ -3032,10 +3038,10 @@ index 67c8184..769fa40 100644
      enum class Unit : uint8_t
      {
 diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
-index c5e31c4..e8cd098 100644
+index c5e31c4..e873ad9 100644
 --- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
 +++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
-@@ -1,13 +1,22 @@
+@@ -1,13 +1,23 @@
 +#include <thread> // GHS_SLOWPROF (GHS-TRACE)
 +#include <immintrin.h> // __rdtsc (GHS-TRACE)
  #include "runtime/ee_scheduler.h"
@@ -3053,12 +3059,13 @@ index c5e31c4..e8cd098 100644
  #include <cstring>
  #include <limits>
  #include <stdexcept>
++void ghsProfileGameThread(int seconds, const wchar_t *threadName); // Kernel/GhsStackDump.cpp
 +void ghsDumpAllThreadStacks(); // GHS: Kernel/GhsStackDump.cpp (the stall report: every host thread's stack and this
 +void ghsPrintCurrentStack();  // one's, with the recompiled function names)
  
  namespace
  {
-@@ -31,7 +40,14 @@ namespace
+@@ -31,7 +41,14 @@ namespace
      constexpr uint32_t WEF_OR = 0x01u;
      constexpr uint32_t WEF_CLEAR = 0x10u;
      constexpr uint32_t WEF_CLEAR_ALL = 0x20u;
@@ -3074,7 +3081,7 @@ index c5e31c4..e8cd098 100644
      constexpr auto kVBlankDuration = std::chrono::microseconds(500);
      constexpr uint64_t kAlarmTickMicroseconds = 64u;
      constexpr uint32_t kDebugPublishDispatchInterval = 4096u;
-@@ -50,7 +66,6 @@ namespace
+@@ -50,7 +67,6 @@ namespace
          return std::chrono::seconds(wholeSeconds) + std::chrono::nanoseconds(remainingNanoseconds);
      }
  
@@ -3082,7 +3089,7 @@ index c5e31c4..e8cd098 100644
      constexpr uint64_t kVBlankDurationCycles = microsecondsToEeCycles(500u);
      constexpr uint64_t kAlarmTickCycles = microsecondsToEeCycles(kAlarmTickMicroseconds);
  
-@@ -146,12 +161,34 @@ void EeScheduler::reset(uint8_t *rdram, const R5900Context &mainContext)
+@@ -146,12 +162,34 @@ void EeScheduler::reset(uint8_t *rdram, const R5900Context &mainContext)
      main.status = EeThreadStatus::Ready;
      m_threads.emplace(main.id, std::move(main));
      m_readyQueues[0].push_back(kMainThreadId);
@@ -3119,7 +3126,7 @@ index c5e31c4..e8cd098 100644
  void EeScheduler::run()
  {
      assertExecutor();
-@@ -159,6 +196,67 @@ void EeScheduler::run()
+@@ -159,6 +197,67 @@ void EeScheduler::run()
  
      while (!m_stopRequested.load(std::memory_order_acquire))
      {
@@ -3187,7 +3194,7 @@ index c5e31c4..e8cd098 100644
          processPendingEvents();
          if (m_stopRequested.load(std::memory_order_acquire))
          {
-@@ -185,6 +283,8 @@ void EeScheduler::run()
+@@ -185,6 +284,8 @@ void EeScheduler::run()
                  GuestThread *owner = &acquireInvocationThread();
                  GuestInvocation invocation = std::move(m_pendingInvocations.front());
                  m_pendingInvocations.pop_front();
@@ -3196,7 +3203,7 @@ index c5e31c4..e8cd098 100644
                  owner->status = EeThreadStatus::Running;
                  m_currentThreadId = owner->id;
                  renewTimeSlice();
-@@ -208,6 +308,7 @@ void EeScheduler::run()
+@@ -208,6 +309,7 @@ void EeScheduler::run()
              }
              catch (const EeDispatcherTransfer &)
              {
@@ -3204,7 +3211,7 @@ index c5e31c4..e8cd098 100644
              }
              if (m_currentThreadId == 0)
              {
-@@ -242,6 +343,7 @@ void EeScheduler::run()
+@@ -242,6 +344,7 @@ void EeScheduler::run()
                      }
                      catch (const EeDispatcherTransfer &)
                      {
@@ -3212,7 +3219,7 @@ index c5e31c4..e8cd098 100644
                      }
                  }
                  continue;
-@@ -258,6 +360,8 @@ void EeScheduler::run()
+@@ -258,6 +361,8 @@ void EeScheduler::run()
          {
              GuestInvocation invocation = std::move(m_pendingInvocations.front());
              m_pendingInvocations.pop_front();
@@ -3221,7 +3228,7 @@ index c5e31c4..e8cd098 100644
              if (getRegU32(&invocation.context, 29) == 0u)
              {
                  SET_GPR_U32(&invocation.context, 29, invocationStackTop());
-@@ -289,11 +393,14 @@ void EeScheduler::run()
+@@ -289,11 +394,14 @@ void EeScheduler::run()
  
          if (checkpointDue(kGuestDispatchCycles))
          {
@@ -3236,7 +3243,7 @@ index c5e31c4..e8cd098 100644
              m_insideInterrupt = !running->invocations.empty() && running->invocations.back().kind == GuestInvocationKind::Interrupt;
              m_guestExecuting.store(true, std::memory_order_release);
              function(m_rdram, &context, &m_runtime);
-@@ -302,6 +409,7 @@ void EeScheduler::run()
+@@ -302,6 +410,7 @@ void EeScheduler::run()
          }
          catch (const EeDispatcherTransfer &)
          {
@@ -3244,7 +3251,7 @@ index c5e31c4..e8cd098 100644
              m_guestExecuting.store(false, std::memory_order_release);
              m_insideInterrupt = false;
          }
-@@ -354,6 +462,7 @@ void EeScheduler::postEvent(EeEvent event)
+@@ -354,6 +463,7 @@ void EeScheduler::postEvent(EeEvent event)
      m_eventCv.notify_one();
  }
  
@@ -3252,7 +3259,7 @@ index c5e31c4..e8cd098 100644
  bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
  {
      accountCycles(cycles);
-@@ -361,12 +470,14 @@ bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
+@@ -361,12 +471,14 @@ bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
      if (m_checkpointPending.load(std::memory_order_acquire) ||
          m_stopRequested.load(std::memory_order_acquire))
      {
@@ -3267,7 +3274,7 @@ index c5e31c4..e8cd098 100644
          m_checkpointPending.store(true, std::memory_order_release);
          return true;
      }
-@@ -388,9 +499,70 @@ bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
+@@ -388,9 +500,70 @@ bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
      return false;
  }
  
@@ -3339,7 +3346,7 @@ index c5e31c4..e8cd098 100644
      m_eeCycle += elapsed;
      m_pendingEeTimerInterrupts |= m_runtime.memory().advanceEeTimers(elapsed);
      m_runtime.advanceIopEeCycles(elapsed);
-@@ -423,7 +595,9 @@ void EeScheduler::setupCurrentThread(uint32_t stack, uint32_t stackSize, uint32_
+@@ -423,7 +596,9 @@ void EeScheduler::setupCurrentThread(uint32_t stack, uint32_t stackSize, uint32_
  int EeScheduler::createThread(const EeThreadCreateParams &params)
  {
      assertExecutor();
@@ -3350,7 +3357,7 @@ index c5e31c4..e8cd098 100644
      {
          return KE_ILLEGAL_PRIORITY;
      }
-@@ -472,6 +646,7 @@ int EeScheduler::deleteThread(int id, uint32_t &ownedStack)
+@@ -472,6 +647,7 @@ int EeScheduler::deleteThread(int id, uint32_t &ownedStack)
          ownedStack = it->second.stack;
      }
      m_threads.erase(it);
@@ -3358,7 +3365,7 @@ index c5e31c4..e8cd098 100644
      publishSnapshot();
      return KE_OK;
  }
-@@ -520,13 +695,14 @@ int EeScheduler::startThread(int id, uint32_t arg, const R5900Context &caller, b
+@@ -520,13 +696,14 @@ int EeScheduler::startThread(int id, uint32_t arg, const R5900Context &caller, b
      if (deleteThreadRecord && id != kMainThreadId)
      {
          m_threads.erase(id);
@@ -3374,7 +3381,7 @@ index c5e31c4..e8cd098 100644
  }
  
  int EeScheduler::terminateThread(int id, uint32_t &ownedStack, bool interruptSafe)
-@@ -654,7 +830,11 @@ void EeScheduler::sleepCurrent()
+@@ -654,7 +831,11 @@ void EeScheduler::sleepCurrent()
  int EeScheduler::wakeupThread(int id, bool interruptSafe)
  {
      assertExecutor();
@@ -3387,7 +3394,7 @@ index c5e31c4..e8cd098 100644
      {
          return KE_ILLEGAL_THID;
      }
-@@ -755,6 +935,22 @@ int EeScheduler::rotateReadyQueue(int priority, bool interruptSafe)
+@@ -755,6 +936,22 @@ int EeScheduler::rotateReadyQueue(int priority, bool interruptSafe)
      }
  
      GuestThread *self = currentThread();
@@ -3410,7 +3417,7 @@ index c5e31c4..e8cd098 100644
      if (self && self->currentPriority == priority)
      {
          enqueueReady(*self);
-@@ -815,7 +1011,7 @@ void EeScheduler::transferIfRequested(bool interruptSafe)
+@@ -815,7 +1012,7 @@ void EeScheduler::transferIfRequested(bool interruptSafe)
      m_rescheduleRequested = false;
      m_timeSliceExpired = false;
      publishSnapshot();
@@ -3419,7 +3426,7 @@ index c5e31c4..e8cd098 100644
  }
  
  int EeScheduler::createSemaphore(int initCount, int maxCount, uint32_t attr, uint32_t option)
-@@ -1101,11 +1297,85 @@ int EeScheduler::cancelAlarm(int id)
+@@ -1101,11 +1298,85 @@ int EeScheduler::cancelAlarm(int id)
  void EeScheduler::queueInvocation(GuestInvocation invocation)
  {
      assertExecutor();
@@ -3505,7 +3512,7 @@ index c5e31c4..e8cd098 100644
  [[noreturn]] void EeScheduler::invokeCurrent(GuestInvocation invocation)
  {
      assertExecutor();
-@@ -1118,7 +1388,7 @@ void EeScheduler::queueInvocation(GuestInvocation invocation)
+@@ -1118,7 +1389,7 @@ void EeScheduler::queueInvocation(GuestInvocation invocation)
      invocation.sequence = ++m_invocationSequence;
      owner->invocations.push_back(std::move(invocation));
      publishSnapshot();
@@ -3514,7 +3521,7 @@ index c5e31c4..e8cd098 100644
  }
  
  [[noreturn]] void EeScheduler::invokeCurrentSequence(std::vector<GuestInvocation> invocations)
-@@ -1137,7 +1407,7 @@ void EeScheduler::queueInvocation(GuestInvocation invocation)
+@@ -1137,7 +1408,7 @@ void EeScheduler::queueInvocation(GuestInvocation invocation)
          owner->invocations.push_back(std::move(*it));
      }
      publishSnapshot();
@@ -3523,7 +3530,7 @@ index c5e31c4..e8cd098 100644
  }
  
  bool EeScheduler::hasInvocation(GuestInvocationKind kind, uint64_t tag) const
-@@ -1171,7 +1441,16 @@ uint32_t EeScheduler::invocationStackTop()
+@@ -1171,7 +1442,16 @@ uint32_t EeScheduler::invocationStackTop()
          return existing->second;
      }
      constexpr uint32_t kInvocationStackSize = 0x4000u;
@@ -3541,7 +3548,7 @@ index c5e31c4..e8cd098 100644
      if (top == 0u)
      {
          throw std::runtime_error("EE invocation stack space exhausted");
-@@ -1180,6 +1459,22 @@ uint32_t EeScheduler::invocationStackTop()
+@@ -1180,6 +1460,22 @@ uint32_t EeScheduler::invocationStackTop()
      return top;
  }
  
@@ -3564,7 +3571,7 @@ index c5e31c4..e8cd098 100644
  int EeScheduler::addIrqHandler(bool dmac,
                                 uint32_t cause,
                                 uint32_t handler,
-@@ -1234,6 +1529,9 @@ int EeScheduler::setIrqHandlerEnabled(bool dmac, int id, bool enabled)
+@@ -1234,6 +1530,9 @@ int EeScheduler::setIrqHandlerEnabled(bool dmac, int id, bool enabled)
      return KE_OK;
  }
  
@@ -3574,7 +3581,7 @@ index c5e31c4..e8cd098 100644
  int EeScheduler::setIrqCauseEnabled(bool dmac, uint32_t cause, bool enabled)
  {
      assertExecutor();
-@@ -1243,6 +1541,13 @@ int EeScheduler::setIrqCauseEnabled(bool dmac, uint32_t cause, bool enabled)
+@@ -1243,6 +1542,13 @@ int EeScheduler::setIrqCauseEnabled(bool dmac, uint32_t cause, bool enabled)
          if (enabled)
          {
              mask |= 1u << cause;
@@ -3588,7 +3595,7 @@ index c5e31c4..e8cd098 100644
          }
          else
          {
-@@ -1258,10 +1563,15 @@ void EeScheduler::dispatchIrq(bool dmac, uint32_t cause)
+@@ -1258,10 +1564,15 @@ void EeScheduler::dispatchIrq(bool dmac, uint32_t cause)
      const uint32_t mask = dmac ? m_enabledDmacMask : m_enabledIntcMask;
      if (cause < 32u && (mask & (1u << cause)) == 0u)
      {
@@ -3605,7 +3612,7 @@ index c5e31c4..e8cd098 100644
      for (const auto &[id, handler] : handlers)
      {
          (void)id;
-@@ -1283,8 +1593,10 @@ void EeScheduler::dispatchIrq(bool dmac, uint32_t cause)
+@@ -1283,8 +1594,10 @@ void EeScheduler::dispatchIrq(bool dmac, uint32_t cause)
          SET_GPR_U32(&invocation.context, 28, handler.gp);
          SET_GPR_U32(&invocation.context, 29, 0u);
          SET_GPR_U32(&invocation.context, 31, 0u);
@@ -3616,7 +3623,7 @@ index c5e31c4..e8cd098 100644
  }
  
  void EeScheduler::setVSyncFlag(uint32_t flagAddress, uint32_t tickAddress)
-@@ -1320,8 +1632,127 @@ uint32_t EeScheduler::setGsVSyncCallback(uint32_t callback, uint32_t gp, uint32_
+@@ -1320,8 +1633,126 @@ uint32_t EeScheduler::setGsVSyncCallback(uint32_t callback, uint32_t gp, uint32_
      return previous;
  }
  
@@ -3686,7 +3693,6 @@ index c5e31c4..e8cd098 100644
 +                        now - lastProf > std::chrono::seconds(15))
 +                    {
 +                        lastProf = now;
-+                        void ghsProfileGameThread(int seconds, const wchar_t *threadName); // Kernel/GhsStackDump.cpp
 +                        std::thread([] { ghsProfileGameThread(1, L"GameThread"); }).detach();
 +                    }
 +                    std::fprintf(stderr, "[GHS-SLOWFRAME] t=%.2f s: %.1f ms (%llu VBlanks): EE work %.1f ms (of it VU1 fence wait %.1f), EE idle %.1f; IOP calls %.1f (lock wait %.1f); %llu transfers %.1f ms; %llu GIF syncs %.1f ms; guest ms by thread:%s\n",
@@ -4642,10 +4648,10 @@ index e1be7d2..223930c 100644
          setReturnU32(ctx, returnValue);
      }
 diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
-index 9c54919..03792cb 100644
+index 9c54919..da06737 100644
 --- a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
 +++ b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
-@@ -1,9 +1,16 @@
+@@ -1,9 +1,17 @@
  #include "Common.h"
  #include "GS.h"
 +#include <cstdio> // GHS-TRACE
@@ -4654,6 +4660,7 @@ index 9c54919..03792cb 100644
  #include "runtime/gs/ps2_gs_psmct16.h"
  #include "runtime/ee_scheduler.h"
 +#include <cstdlib>
++void eeSetVideoModePal(bool pal); // Kernel/EeScheduler.cpp
 +
 +bool ghsVif1Async(); // gs/ps2_gif_arbiter.cpp
 +void ghsGifPostOrdered(std::function<void()> fn);
@@ -4662,7 +4669,7 @@ index 9c54919..03792cb 100644
  
  namespace ps2_stubs
  {
-@@ -17,7 +24,7 @@ namespace ps2_stubs
+@@ -17,7 +25,7 @@ namespace ps2_stubs
  
          uint64_t makeClearRgbaq(uint32_t rgba)
          {
@@ -4671,7 +4678,7 @@ index 9c54919..03792cb 100644
          }
  
          uint64_t makeClearXyz(int32_t x, int32_t y)
-@@ -593,7 +600,10 @@ namespace ps2_stubs
+@@ -593,7 +601,10 @@ namespace ps2_stubs
      void sceGsExecLoadImage(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
      {
          uint32_t imgAddr = getRegU32(ctx, 4);
@@ -4683,7 +4690,7 @@ index 9c54919..03792cb 100644
  
          GsImageMem img{};
          if (!runtime || !runtime->syncCoreSubsystems() || !readGsImage(rdram, imgAddr, img))
-@@ -611,6 +621,18 @@ namespace ps2_stubs
+@@ -611,6 +622,18 @@ namespace ps2_stubs
  
          uint32_t fbw = img.vram_width ? img.vram_width : std::max<uint32_t>(1, (img.width + 63) / 64);
          const uint32_t totalImageBytes = rowBytes * static_cast<uint32_t>(img.height);
@@ -4702,7 +4709,7 @@ index 9c54919..03792cb 100644
          const uint32_t headerQwc = 6u;
          const uint32_t imageQwc = (totalImageBytes + 15u) / 16u;
          const uint32_t totalQwc = headerQwc + imageQwc;
-@@ -631,7 +653,9 @@ namespace ps2_stubs
+@@ -631,7 +654,9 @@ namespace ps2_stubs
              return;
          }
  
@@ -4713,7 +4720,7 @@ index 9c54919..03792cb 100644
          uint32_t dsax = static_cast<uint32_t>(img.x);
          uint32_t dsay = static_cast<uint32_t>(img.y);
  
-@@ -696,7 +720,7 @@ namespace ps2_stubs
+@@ -696,7 +721,7 @@ namespace ps2_stubs
              return;
          }
  
@@ -4722,7 +4729,7 @@ index 9c54919..03792cb 100644
          uint64_t bitbltbuf = (static_cast<uint64_t>(sbp & 0x3FFFu) << 0) |
                               (static_cast<uint64_t>(fbw & 0x3Fu) << 16) |
                               (static_cast<uint64_t>(img.psm & 0x3Fu) << 24) |
-@@ -766,6 +790,20 @@ namespace ps2_stubs
+@@ -766,6 +791,20 @@ namespace ps2_stubs
              setReturnS32(ctx, -1);
              return;
          }
@@ -4743,13 +4750,12 @@ index 9c54919..03792cb 100644
          applyGsDispEnv(runtime, env);
          setReturnS32(ctx, 0);
      }
-@@ -800,6 +838,12 @@ namespace ps2_stubs
+@@ -800,6 +839,11 @@ namespace ps2_stubs
  
              g_gparam.interlace = static_cast<uint8_t>(interlace & 0x1);
              g_gparam.omode = static_cast<uint8_t>(omode & 0xFF);
 +            {
 +                // The BIOS's sceGsResetGraph calls SetGsCrt, which picks the VBlank rate: PAL (3) = 50 Hz.
-+                void eeSetVideoModePal(bool pal); // Kernel/EeScheduler.cpp
 +                eeSetVideoModePal(omode == 3u);
 +                std::fprintf(stderr, "[GHS] sceGsResetGraph omode=0x%x -> VBlank %d Hz\n", omode, omode == 3u ? 50 : 60);
 +            }
@@ -6065,10 +6071,16 @@ index 5e9a446..6ba8885 100644
 +                                  std::function<void(bool, uint32_t)> done);
  }
 diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
-index 9614016..94b1d2c 100644
+index 9614016..2624957 100644
 --- a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
 +++ b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
-@@ -6,9 +6,17 @@ namespace ps2_syscalls
+@@ -1,14 +1,22 @@
+ #include "Common.h"
+ #include "System.h"
++void eeSetVideoModePal(bool pal); // Kernel/EeScheduler.cpp
+ 
+ namespace ps2_syscalls
+ {
      void GsSetCrt(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
      {
          int interlaced = getRegU32(ctx, 4); // $a0 - 0=non-interlaced, 1=interlaced
@@ -6077,7 +6089,6 @@ index 9614016..94b1d2c 100644
          int frameMode = getRegU32(ctx, 6);  // $a2 - 0=field, 1=frame
  
 +        {
-+            void eeSetVideoModePal(bool pal); // Kernel/EeScheduler.cpp
 +            eeSetVideoModePal(videoMode == 3);
 +            static int lastMode = -1;
 +            if (videoMode != lastMode)
@@ -8465,16 +8476,18 @@ index f0ad507..e35fe44 100644
 +}
 diff --git a/ps2xRuntime/src/lib/gs/gs_cpu_simd.cpp b/ps2xRuntime/src/lib/gs/gs_cpu_simd.cpp
 new file mode 100644
-index 0000000..a7910c8
+index 0000000..52de8fb
 --- /dev/null
 +++ b/ps2xRuntime/src/lib/gs/gs_cpu_simd.cpp
-@@ -0,0 +1,418 @@
+@@ -0,0 +1,424 @@
 +// Compiled with /arch:AVX2 (CMakeLists.txt). Only intrinsics do float math here, so nothing gets fused into FMA.
 +#include "gs_cpu_simd.h"
 +#include <cstdlib>
 +#include <cstring>
 +#include <immintrin.h>
++#ifdef _MSC_VER
 +#include <intrin.h>
++#endif
 +
 +namespace gs_simd
 +{
@@ -8484,6 +8497,9 @@ index 0000000..a7910c8
 +        {
 +            if (const char *v = std::getenv("GHS_GS_NO_SIMD"); v && v[0] != '0')
 +                return false;
++#ifndef _MSC_VER
++            return __builtin_cpu_supports("avx2") != 0; // gcc/clang: checks the OS's YMM state too
++#else
 +            int r[4];
 +            __cpuid(r, 0);
 +            if (r[0] < 7)
@@ -8493,6 +8509,7 @@ index 0000000..a7910c8
 +                return false;
 +            __cpuidex(r, 7, 0);
 +            return ((r[1] >> 5) & 1) != 0; // AVX2
++#endif
 +        }();
 +        return ok;
 +    }
@@ -9835,7 +9852,7 @@ index 5658928..6c5979d 100644
      batch.state.pabe = m_pabe;
 diff --git a/ps2xRuntime/src/lib/gs/gs_gpu_backend.cpp b/ps2xRuntime/src/lib/gs/gs_gpu_backend.cpp
 new file mode 100644
-index 0000000..9c0dc00
+index 0000000..83d18c2
 --- /dev/null
 +++ b/ps2xRuntime/src/lib/gs/gs_gpu_backend.cpp
 @@ -0,0 +1,3652 @@
@@ -9860,6 +9877,7 @@ index 0000000..9c0dc00
 +#include <string>
 +#include <chrono>
 +#include <thread>
++void gsDisableRowParallelismOnThisThread(); // gs_cpu_backend.cpp: big triangles in row bands on other threads race where pixels alias
 +
 +#ifdef _WIN32
 +#include <filesystem>
@@ -13215,7 +13233,6 @@ index 0000000..9c0dc00
 +    for (uint8_t &b : cpuVram)
 +        b = static_cast<uint8_t>(rng());
 +    gpuVram = cpuVram;
-+    void gsDisableRowParallelismOnThisThread(); // gs_cpu_backend.cpp: big triangles in row bands on other threads race where pixels alias
 +    gsDisableRowParallelismOnThisThread();
 +    GSCpuBackend cpu;
 +    GSGpuBackend gpu;
@@ -14201,10 +14218,10 @@ index 0000000..527f359
 +}
 diff --git a/ps2xRuntime/src/lib/gs/gs_threaded_backend.cpp b/ps2xRuntime/src/lib/gs/gs_threaded_backend.cpp
 new file mode 100644
-index 0000000..28d1fac
+index 0000000..205c794
 --- /dev/null
 +++ b/ps2xRuntime/src/lib/gs/gs_threaded_backend.cpp
-@@ -0,0 +1,1523 @@
+@@ -0,0 +1,1521 @@
 +#include "gs_threaded_backend.h"
 +#include "runtime/gs/gs_cpu_backend.h" // GSCpuBackend::ClutLayout / ClutSourcePixel
 +#include "runtime/gs/ps2_gs_memory.h"  // GSMem::ByteAddress32/16
@@ -14223,6 +14240,10 @@ index 0000000..28d1fac
 +#include <cstdlib>
 +#include <type_traits>
 +#include <cstring>
++void ghsTexStatsReport(); // gs_cpu_backend.cpp
++void gsDisableRowParallelismOnThisThread(); // gs_cpu_backend.cpp
++uint64_t ghsGpuHiresHash(); // gs_gpu_backend.cpp
++void ghsProfileGameThread(int seconds, const wchar_t *threadName); // Kernel/GhsStackDump.cpp
 +void ghsPlaceThread(bool vu1); // ps2_thread_placement.cpp
 +namespace
 +{
@@ -14506,7 +14527,6 @@ index 0000000..28d1fac
 +                static const bool perFrame = std::getenv("GHS_GS_TEXSTATS_FRAMES") != nullptr; // GHS-TRACE: texture stats per frame
 +                if (perFrame)
 +                {
-+                    void ghsTexStatsReport(); // gs_cpu_backend.cpp
 +                    ghsTexStatsReport();
 +                }
 +                break;
@@ -14526,7 +14546,6 @@ index 0000000..28d1fac
 +                std::fwrite(g_bench.stream.data(), 1, g_bench.stream.size(), f);
 +                std::fclose(f);
 +            }
-+        void gsDisableRowParallelismOnThisThread(); // gs_cpu_backend.cpp
 +        gsDisableRowParallelismOnThisThread();
 +        std::vector<uint8_t> vram(g_bench.start.size());
 +        // GHS_GS_BENCH_THREADED=N: replay through the band threads (as in the game) and also report the
@@ -14577,11 +14596,9 @@ index 0000000..28d1fac
 +                g_crossBarriers = g_barriers = 0;
 +            }
 +            std::fprintf(stderr, "[GHS-GSBENCH] pass %d: %.2f ms per frame (%zu bytes of commands, %d frames)\n", pass, ms, g_bench.stream.size(), g_bench.frames);
-+            void ghsTexStatsReport(); // gs_cpu_backend.cpp
 +            ghsTexStatsReport();
 +        }
 +        std::fprintf(stderr, "[GHS-GSBENCH] best %.2f ms per frame\n", best);
-+        uint64_t ghsGpuHiresHash(); // gs_gpu_backend.cpp
 +        if (const uint64_t h = ghsGpuHiresHash())
 +            std::fprintf(stderr, "[GHS-GSBENCH] scaled surfaces hash %016llx\n", static_cast<unsigned long long>(h));
 +        for (const auto &[key, count] : g_benchTargets) // GHS-TRACE: GHS_GS_BENCH_TARGETS
@@ -14619,7 +14636,6 @@ index 0000000..28d1fac
 +                target = std::string(prof) == "1" ? std::wstring(L"GSReplay") : std::wstring(prof, prof + std::strlen(prof));
 +                profiler = std::thread([]()
 +                                       {
-+                    void ghsProfileGameThread(int seconds, const wchar_t *threadName); // Kernel/GhsStackDump.cpp
 +                    std::this_thread::sleep_for(std::chrono::milliseconds(std::getenv("GHS_GS_REPLAY_PROF_DELAY") ? std::atoi(std::getenv("GHS_GS_REPLAY_PROF_DELAY")) : 1500)); // ms
 +                    ghsProfileGameThread(5, target.c_str()); });
 +            }
@@ -14650,7 +14666,6 @@ index 0000000..28d1fac
 +                                   {
 +            ThreadNaming::SetCurrentThreadName(i == 0 ? "GSThread" : ("GSThread" + std::to_string(i)).c_str());
 +            ghsPlaceThread(false);
-+            void gsDisableRowParallelismOnThisThread(); // gs_cpu_backend.cpp
 +            gsDisableRowParallelismOnThisThread();
 +            workerLoop(*raw); });
 +        m_bands.push_back(std::move(band));
@@ -19509,7 +19524,7 @@ index b02c7ca..8f94530 100644
              {
                  const uint8_t *srcBase = data + pos;
 diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
-index bd75bba..9a28482 100644
+index bd75bba..68d9fb0 100644
 --- a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
 +++ b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
 @@ -1,27 +1,1311 @@
@@ -20400,7 +20415,7 @@ index bd75bba..9a28482 100644
 +                std::snprintf(line, sizeof(line), fmt, args...);
 +                g += line;
 +            };
-+            put("static __declspec(noinline) __declspec(safebuffers) bool block_%s_%04x(Interp &vu, Ctx &a)\n{\n    VU1State &st = vu.m_state;\n"
++            put("static VU_NOINLINE bool block_%s_%04x(Interp &vu, Ctx &a)\n{\n    VU1State &st = vu.m_state;\n"
 +                "    uint64_t c0 = vu.m_cycle;\n    uint64_t *vfR = &vu.m_vfReady[0][0];\n", hexName(hash).c_str(), b.start * 8u);
 +            // The first pair waits for its registers from before the block, as the per-pair path would.
 +            for (const auto &[idx, off] : b.vfReq)
@@ -20754,8 +20769,8 @@ index bd75bba..9a28482 100644
 +                ++count;
 +            }
 +            std::fprintf(stderr, "[GHS-VU1REGEN] translated %d images (%d recipes skipped), exiting\n", count, bad);
-+            std::fflush(stderr);
-+            std::exit(0);
++            std::fflush(nullptr);
++            std::_Exit(0); // not exit(): static destructors under the still running threads crashed on Linux
 +        }
 +        Table &t = table(vu1);
 +        const uint64_t generation = vu1 ? memory->getVU1CodeGeneration() : memory->getVU0CodeGeneration();
@@ -20969,6 +20984,26 @@ index bd75bba..9a28482 100644
              continue;
          }
  
+@@ -229,7 +1595,7 @@ bool VU1Interpreter::calculateFmacExactResult(uint32_t component,
+ 
+     const auto operand = [this](float value)
+     {
+-        return static_cast<long double>(normalizeOperand(value));
++        return static_cast<double>(normalizeOperand(value));
+     };
+     const auto vs = [&](uint32_t lane)
+     {
+@@ -244,8 +1610,8 @@ bool VU1Interpreter::calculateFmacExactResult(uint32_t component,
+         return operand(m_state.acc[lane]);
+     };
+ 
+-    const long double q = operand(m_state.q);
+-    const long double i = operand(m_state.i);
++    const double q = operand(m_state.q);
++    const double i = operand(m_state.i);
+ 
+     if (op < 0x3Cu)
+     {
 @@ -402,31 +1768,7 @@ bool VU1Interpreter::calculateFmacExactResult(uint32_t component,
  uint8_t VU1Interpreter::normalizeFmacExactResult(float &value,
                                                    long double exactResult) const
@@ -21836,7 +21871,7 @@ index bd75bba..9a28482 100644
      if (useVuRounding && previousRoundingMode != -1)
          std::fesetround(previousRoundingMode);
 diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_detail.h b/ps2xRuntime/src/lib/vu/ps2_vu1_detail.h
-index ed0ee71..b161450 100644
+index ed0ee71..b5d520c 100644
 --- a/ps2xRuntime/src/lib/vu/ps2_vu1_detail.h
 +++ b/ps2xRuntime/src/lib/vu/ps2_vu1_detail.h
 @@ -2,6 +2,7 @@
@@ -21847,7 +21882,7 @@ index ed0ee71..b161450 100644
  
  // Instruction field extraction helpers
  static inline uint8_t DEST(uint32_t i) { return (uint8_t)((i >> 21) & 0xF); }
-@@ -26,4 +27,30 @@ static inline int16_t IMM15(uint32_t i)
+@@ -26,4 +27,32 @@ static inline int16_t IMM15(uint32_t i)
      return (int16_t)(int32_t)((int32_t)(raw << 17) >> 17);
  }
  
@@ -21855,8 +21890,10 @@ index ed0ee71..b161450 100644
 +// read): denormals read as signed zero, Inf/NaN as signed max float.
 +#if defined(_MSC_VER)
 +#define VU_FORCEINLINE __forceinline // called per operand in the VU1 fast paths; MSVC stopped inlining it there
++#define VU_NOINLINE __declspec(noinline) __declspec(safebuffers) // the translated blocks (generated/)
 +#else
 +#define VU_FORCEINLINE inline __attribute__((always_inline))
++#define VU_NOINLINE __attribute__((noinline))
 +#endif
 +static VU_FORCEINLINE float vuNormalizeOperand(float value)
 +{
@@ -21880,7 +21917,7 @@ index ed0ee71..b161450 100644
  #endif
 diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_fast.h b/ps2xRuntime/src/lib/vu/ps2_vu1_fast.h
 new file mode 100644
-index 0000000..6a38362
+index 0000000..511b68c
 --- /dev/null
 +++ b/ps2xRuntime/src/lib/vu/ps2_vu1_fast.h
 @@ -0,0 +1,1734 @@
@@ -22036,9 +22073,9 @@ index 0000000..6a38362
 +        x.currentTagEop = false;
 +    }
 +
-+    // normalizeFmacExactResult in double (MSVC's long double is double; std::signbit(long double) was
-+    // an out-of-line call per lane).
-+    static_assert(sizeof(long double) == sizeof(double), "exact FMAC results assume long double == double");
++    // normalizeFmacExactResult in double (the interpreter's exact results are double too, as MSVC's long double
++    // was: gcc's 80-bit long double would round the sum differently; std::signbit(long double) was an out-of-line
++    // call per lane).
 +    inline uint8_t fmacExactFlags(float &value, double exactResult)
 +    {
 +        uint64_t exactBits;
@@ -23478,7 +23515,7 @@ index 0000000..6a38362
 +    // A pair inside a statically scheduled block: its issue cycle is known, so no ready check,
 +    // stall, ready-cycle marks or cycle stepping (the block does those once).
 +    template <PairC P>
-+    static __declspec(noinline) __declspec(safebuffers) void staticPair(Interp &vu, Ctx &a, uint32_t pc, uint64_t cycle)
++    static VU_NOINLINE void staticPair(Interp &vu, Ctx &a, uint32_t pc, uint64_t cycle)
 +    {
 +        // The cycles since the previous pair (stalls included), with their commits and XGKICK progress;
 +        // usually nothing happens in between and the clock just moves.
@@ -23494,7 +23531,7 @@ index 0000000..6a38362
 +    // One pair of a translated program: loopPairs' iteration with every field constant. Returns true
 +    // when the run stops (program end, budget, stop request).
 +    template <PairC P>
-+    static __declspec(noinline) __declspec(safebuffers) bool step(Interp &vu, Ctx &a, uint32_t pc); // defined below
++    static VU_NOINLINE bool step(Interp &vu, Ctx &a, uint32_t pc); // defined below
 +
 +    // A translated code image (generated/vu1_<hash>.cpp; nested, so it has VU1Fast's access to VU1Interpreter)
 +    // and its entry point, defined there and listed in generated/vu1_index.inc.
@@ -23858,11 +23895,14 @@ index 94be789..d53cc31 100644
              }
              default:
 diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp
-index 6974254..4d827d1 100644
+index 6974254..775e148 100644
 --- a/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp
 +++ b/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp
-@@ -4,16 +4,24 @@
+@@ -2,18 +2,27 @@
+ #include "ps2_vu1_detail.h"
+ 
  #include <cmath>
++#include <cstdlib>
  #include <cstring>
  #include <limits>
 +#include <cstdio> // GHS-TRACE
@@ -23890,7 +23930,7 @@ index 6974254..4d827d1 100644
          return static_cast<int32_t>(scaled);
      }
  }
-@@ -24,6 +32,13 @@ namespace
+@@ -24,6 +33,13 @@ namespace
  void VU1Interpreter::execUpper(uint32_t instr)
  {
      m_currentUpperInstruction = instr;
@@ -23904,7 +23944,7 @@ index 6974254..4d827d1 100644
      uint8_t dest = DEST(instr);
      uint8_t ft = FT(instr);
      uint8_t fs = FS(instr);
-@@ -36,15 +51,15 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -36,15 +52,15 @@ void VU1Interpreter::execUpper(uint32_t instr)
      float normalizedAcc[4];
      for (uint32_t component = 0; component < 4u; ++component)
      {
@@ -23925,7 +23965,7 @@ index 6974254..4d827d1 100644
      float result[4];
  
      // Upper opcode decoding (bits 5:0 of upper word)
-@@ -55,7 +70,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -55,7 +71,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
      case 0x02:
      case 0x03: // ADDbc
      {
@@ -23934,7 +23974,7 @@ index 6974254..4d827d1 100644
          for (int c = 0; c < 4; c++)
              result[c] = vs[c] + bc;
          applyFmacDest(vd, result, dest);
-@@ -66,7 +81,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -66,7 +82,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
      case 0x06:
      case 0x07: // SUBbc
      {
@@ -23943,7 +23983,7 @@ index 6974254..4d827d1 100644
          for (int c = 0; c < 4; c++)
              result[c] = vs[c] - bc;
          applyFmacDest(vd, result, dest);
-@@ -77,7 +92,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -77,7 +93,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
      case 0x0A:
      case 0x0B: // MADDbc
      {
@@ -23952,7 +23992,7 @@ index 6974254..4d827d1 100644
          for (int c = 0; c < 4; c++)
              result[c] = acc[c] + vs[c] * bc;
          applyFmacDest(vd, result, dest);
-@@ -88,7 +103,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -88,7 +104,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
      case 0x0E:
      case 0x0F: // MSUBbc
      {
@@ -23961,7 +24001,7 @@ index 6974254..4d827d1 100644
          for (int c = 0; c < 4; c++)
              result[c] = acc[c] - vs[c] * bc;
          applyFmacDest(vd, result, dest);
-@@ -99,7 +114,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -99,7 +115,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
      case 0x12:
      case 0x13: // MAXbc
      {
@@ -23970,7 +24010,7 @@ index 6974254..4d827d1 100644
          for (int c = 0; c < 4; c++)
              result[c] = (vs[c] > bc) ? vs[c] : bc;
          applyDest(vd, result, dest);
-@@ -110,7 +125,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -110,7 +126,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
      case 0x16:
      case 0x17: // MINIbc
      {
@@ -23979,7 +24019,7 @@ index 6974254..4d827d1 100644
          for (int c = 0; c < 4; c++)
              result[c] = (vs[c] < bc) ? vs[c] : bc;
          applyDest(vd, result, dest);
-@@ -121,7 +136,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -121,7 +137,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
      case 0x1A:
      case 0x1B: // MULbc
      {
@@ -23988,7 +24028,7 @@ index 6974254..4d827d1 100644
          for (int c = 0; c < 4; c++)
              result[c] = vs[c] * bc;
          applyFmacDest(vd, result, dest);
-@@ -249,7 +264,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -249,7 +265,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
          case 0x02:
          case 0x03: // ADDAbc
          {
@@ -23997,7 +24037,7 @@ index 6974254..4d827d1 100644
              for (int c = 0; c < 4; c++)
                  result[c] = vs[c] + bc;
              applyFmacDestAcc(result, dest);
-@@ -260,7 +275,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -260,7 +276,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
          case 0x06:
          case 0x07: // SUBAbc
          {
@@ -24006,7 +24046,7 @@ index 6974254..4d827d1 100644
              for (int c = 0; c < 4; c++)
                  result[c] = vs[c] - bc;
              applyFmacDestAcc(result, dest);
-@@ -271,7 +286,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -271,7 +287,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
          case 0x0A:
          case 0x0B: // MADDAbc
          {
@@ -24015,7 +24055,7 @@ index 6974254..4d827d1 100644
              for (int c = 0; c < 4; c++)
                  result[c] = acc[c] + vs[c] * bc;
              applyFmacDestAcc(result, dest);
-@@ -282,7 +297,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -282,7 +298,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
          case 0x0E:
          case 0x0F: // MSUBAbc
          {
@@ -24024,7 +24064,7 @@ index 6974254..4d827d1 100644
              for (int c = 0; c < 4; c++)
                  result[c] = acc[c] - vs[c] * bc;
              applyFmacDestAcc(result, dest);
-@@ -337,6 +352,29 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -337,6 +353,29 @@ void VU1Interpreter::execUpper(uint32_t instr)
              {
                  int32_t iv = vuFloatToInt(vs[c], 16.0f);
                  std::memcpy(&result[c], &iv, 4);
@@ -24054,7 +24094,7 @@ index 6974254..4d827d1 100644
              }
              applyDest(vtDest, result, dest);
              return;
-@@ -361,7 +399,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+@@ -361,7 +400,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
          case 0x1A:
          case 0x1B: // MULAbc
          {
@@ -24064,28 +24104,22 @@ index 6974254..4d827d1 100644
                  result[c] = vs[c] * bc;
              applyFmacDestAcc(result, dest);
 diff --git a/ps2xRuntime/src/main.cpp b/ps2xRuntime/src/main.cpp
-index 563bcbd..0da4c24 100644
+index 563bcbd..cf64a23 100644
 --- a/ps2xRuntime/src/main.cpp
 +++ b/ps2xRuntime/src/main.cpp
-@@ -14,6 +14,9 @@
+@@ -14,6 +14,11 @@
  #include <exception>
  #include <algorithm>
  #include <cstdlib>
 +#include <cstdio>
 +
 +void ghsDetachConsole(); // GHS: lib/Kernel/GhsStackDump.cpp
++void ghsPrintCurrentStack(); // lib/Kernel/GhsStackDump.cpp
++void ghsDrainLogs(); // lib/Kernel/GhsStackDump.cpp: the log writer's pipe into the files
  
  #if defined(__ANDROID__)
  #include <android/log.h>
-@@ -96,6 +99,7 @@ namespace
-     {
-         std::set_terminate([]()
-                            {
-+                               void ghsPrintCurrentStack(); // lib/Kernel/GhsStackDump.cpp
-                                std::cerr << "[terminate] unhandled exception" << std::endl;
-                                const std::exception_ptr ep = std::current_exception();
-                                if (ep)
-@@ -119,6 +123,12 @@ namespace
+@@ -119,6 +124,11 @@ namespace
                                         std::cerr << "[terminate] non-std exception" << std::endl;
                                     }
                                 }
@@ -24093,7 +24127,6 @@ index 563bcbd..0da4c24 100644
 +                               // these lines were lost; the stack shows where it was thrown (MSVC hasn't unwound yet).
 +                               std::cerr << "[terminate] stack:" << std::endl;
 +                               ghsPrintCurrentStack();
-+                               void ghsDrainLogs(); // lib/Kernel/GhsStackDump.cpp: the log writer's pipe into the files
 +                               ghsDrainLogs();
                                 std::abort(); });
      }

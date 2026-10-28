@@ -614,6 +614,9 @@ namespace
 
     void portTraceThread(PS2Runtime *runtime)
     {
+#ifndef _WIN32
+        return; // the path below is a Windows dev path: elsewhere it named a file in game/ that broke the virtual disc
+#endif
         uint8_t *rdram = runtime->memory().getRDRAM();
         FILE *log = std::fopen("D:\\docs\\ghs-recomp\\recomp\\port_trace.log", "w");
         if (!rdram || !log)

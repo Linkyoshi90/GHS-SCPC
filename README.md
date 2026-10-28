@@ -37,7 +37,7 @@ Not affiliated with or endorsed by the game's publisher or rights holders. All t
 
 | | |
 |---|---|
-| **System** | Windows 10 or 11, 64-bit. A DirectX 11 graphics card (any from the last decade). |
+| **System** | Windows 10 or 11, 64-bit. A DirectX 11 graphics card (any from the last decade). Linux works too, see [Linux](#linux). |
 | **The game** | Your own dump of the **European disc, SLES-51933** (v1.00), as a plain **`.iso`** file. Other formats (`.bin/.cue`, `.chd`, `.cso`) and other releases (US, Japan) are not supported as the main game. The launcher checks the version. |
 | **Git** | https://git-scm.com/download/win (default options are fine). |
 | **C++ Build Tools** | The free **Visual Studio C++ Build Tools** with **"Desktop development with C++"** ticked: https://visualstudio.microsoft.com/visual-cpp-build-tools/ (a full Visual Studio with that workload works too; built and tested with Visual Studio 2026). The launcher checks for Git and these; when one is missing, its button installs them with winget (Windows' package manager) after showing the exact commands, or opens the download pages where winget isn't available. |
@@ -65,6 +65,26 @@ Not affiliated with or endorsed by the game's publisher or rights holders. All t
    you press *Play*, the launcher translates it once (a few minutes).
 
 The launcher can play background music from the game once the disc is unpacked (*Music* button, *Next track*).
+
+### Linux
+
+The launcher is Windows-only; on Linux two shell scripts do its work, and the build uses gcc (or clang) with CMake
+instead of Visual Studio.
+
+1. Install the build tools and libraries (Debian/Ubuntu names; other distributions have the same packages):
+   ```bash
+   sudo apt install git cmake ninja-build g++ pkg-config libarchive-tools libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev
+   ```
+   For graphics on the GPU also install the [Vulkan SDK](https://vulkan.lunarg.com/) (the build needs its `dxc`, with
+   `VULKAN_SDK` set); without it the graphics run on the CPU, which needs a fast CPU.
+2. Unpack the disc and build (30 to 60 minutes, one time): `tools/setup.sh /path/to/disc.iso`. Later runs (after a
+   `git pull`) need no argument and rebuild only what changed.
+3. Play: `tools/launch.sh` (`--cpu` for CPU graphics, `--scale N`, `--online host:7790 --room name`; see the top of
+   the script). Saves go to `recomp/memcards` as on Windows.
+4. New graphics programs the game saved while you played are translated by `tools/add_vu1_images.sh`.
+
+The build goes to `PS2Recomp/out/linux`, so a checkout shared with Windows keeps both builds apart. Needs an x86-64 CPU
+with AVX2 (2013 or later), as on Windows.
 
 ## Playing
 
@@ -164,8 +184,7 @@ folder makes the next build start from scratch (30-60 minutes).
 | The game does not start | Look at `recomp\live.err.log`. |
 | Something looks or behaves wrong | Press **F6** at that moment (saves a snapshot to `game\snapshots`) and open an issue with a description and `recomp\live.err.log`. Don't attach files from `game\`. |
 
-Linux (Wine/Proton): the launcher can start an already built port without PowerShell, but building needs Windows with
-Visual Studio.
+Linux: build and play natively with `tools/setup.sh` and `tools/launch.sh` (see [Linux](#linux)).
 
 ## How it works
 
@@ -194,7 +213,7 @@ Visual Studio.
 - **Debug options** of `tools\launch.ps1`: `-Cpu` (graphics on the CPU), `-Scale N`, `-Pcm` (record sound), `-TexCheck`,
   `-Record` (GS recording with `tools\gs_record_now.ps1`), `-Capture` (record VU1 programs).
 - **Vulkan**: with the [Vulkan SDK](https://vulkan.lunarg.com/) installed, the build also compiles the GPU graphics for
-  Vulkan 1.2 (the path a Linux build will use). The launcher's **Graphics** button (under the steps) picks Direct3D 11,
+  Vulkan 1.2 (the path the Linux build uses). The launcher's **Graphics** button (under the steps) picks Direct3D 11,
   Vulkan or the CPU for the next start; `tools\launch.ps1` follows it (`-Vulkan` / `-Cpu` override it).
 - Never commit anything from `game\`, `PS2Recomp\` or the generated parts of `recomp\` (the `.gitignore` keeps them out).
 

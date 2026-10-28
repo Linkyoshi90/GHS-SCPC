@@ -3,3 +3,5 @@
 # Binaries
 *.exe binary
 *.ico binary
+# Shell scripts run on Linux: LF line endings whatever core.autocrlf says.
+*.sh text eol=lf
