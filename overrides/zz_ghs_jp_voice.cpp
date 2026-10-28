@@ -7,7 +7,7 @@
 // For a mapped clip (channel s2, clip at +24) that call gets the Japanese clip's sector and length instead. On the
 // runner's virtual disc NGYSTM_V.BIN follows NGYSTM_U.BIN directly (files are laid out in name order), so its sectors
 // are EU pool size + n. Volume, loop flag and format (0x340350 records) stay the EU clip's: every mapped clip has the
-// same format code. tools/install_overrides.ps1 copies this into the runner.
+// same format code. "mute" lines (EU lines the JP game shows without a voice) point at a silent clip of the EU pool. tools/install_overrides.ps1 copies this into the runner.
 
 #include "game_overrides.h"
 #include "ps2_runtime.h"
@@ -107,13 +107,20 @@ namespace ghs_jp_voice
         unsigned euClips = 0, jpClips = 0;
         unsigned long long euSectors = 0, jpSectors = 0;
         std::vector<Clip> clips(kClips);
-        int count = 0;
+        int count = 0, muted = 0;
         while (std::fgets(line, sizeof(line), f))
         {
             unsigned eu = 0, jp = 0;
             unsigned long long a = 0, b = 0;
             if (std::sscanf(line, "pool %u %llu %u %llu", &euClips, &euSectors, &jpClips, &jpSectors) == 4)
                 continue;
+            // A line the JP game never voiced: one of the EU pool's silent clips instead of the English recording.
+            if (std::sscanf(line, "mute %u %llu %llu", &eu, &a, &b) == 3 && eu < kClips && a < b && b <= euSectors)
+            {
+                clips[eu] = {a, b};
+                ++muted;
+                continue;
+            }
             if (std::sscanf(line, "%u %u %llu %llu", &eu, &jp, &a, &b) == 4 && eu < kClips && a < b && b <= jpSectors)
             {
                 clips[eu] = {euSectors + a, euSectors + b};
@@ -136,7 +143,7 @@ namespace ghs_jp_voice
             g_play = runtime.lookupFunction(0x002B5230u);
             runtime.replaceFunction(0x002B5230u, &tracePlay);
         }
-        std::fprintf(stderr, "[GHS-JPVOICE] %d clips have a Japanese voice (%s)\n", count, g_ghsJpVoice ? "on" : "off");
+        std::fprintf(stderr, "[GHS-JPVOICE] %d clips have a Japanese voice, %d none (%s)\n", count, muted, g_ghsJpVoice ? "on" : "off");
     }
 
     const ps2_game_overrides::Descriptor kDescriptor{"Gregory Horror Show (EU): Japanese voices", "SLES_519.33", 0x00100008u, 0u, apply};

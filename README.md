@@ -144,6 +144,9 @@ If you also own the **Japanese release** (SLPM-65324), you can hear its voice re
    recording (a few minutes).
 3. In the game: **F2 → Japanese voices**.
 
+Lines the Japanese release shows without a voice (Death's talk in your dreams, Judgment Boy's final quiz) stay
+silent instead of English. After an update that improves the matching, press **Japanese voices ✔** again.
+
 ## Optional: online Hell's Roulette
 
 Two players can play the roulette board game over the network. One player runs the small room server
