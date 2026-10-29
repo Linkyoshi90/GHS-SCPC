@@ -177,6 +177,9 @@ on, in name order (a later mod wins); without mods it puts the original back. In
   as long as each keeps its batches and vertex counts; the skeleton and animations stay. Example:
   `py tools\mod_james_creeper.py` writes `mods\james the creeper` (James as a creeper). Guests posed as part of a
   room (such as Jack Ketch chained in the dungeon) are the room's own models and keep their shape.
+- **Items and props:** `ghsmesh.build` writes a whole new rigid mesh (any shape, one texture). Example:
+  `py tools\mod_miku_doll.py` writes `mods\miku doll`, the Doll item (for Lost Doll) as a chibi Hatsune Miku: its model
+  in the hotel (`041\020.slid`) and on the shop's shelf (`093.slid` `095.bin`/`096`).
 
 ## Where things are
 

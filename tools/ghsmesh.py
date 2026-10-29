@@ -73,6 +73,42 @@ def texture(data):
     return struct.unpack_from("<II", data, t)
 
 
+def build(strip_list, tex0):
+    """A new PM22 mesh (any shape) from triangle strips (vertex lists as vertices() returns them for PM22, wound as
+    above) with one texture (tex0 as texture() returns it). Long strips are split; groups hold up to 40 vertices,
+    the most the game's own meshes put in one VU buffer."""
+    parts = []
+    for s in strip_list:
+        while len(s) > 40:
+            parts.append(s[:40])
+            s = s[38:]  # an even start keeps the winding
+        if len(s) >= 3:
+            parts.append(s)
+    groups = []
+    for p in parts:
+        if groups and sum(map(len, groups[-1])) + len(p) <= 40:
+            groups[-1].append(p)
+        else:
+            groups.append([p])
+    out = bytearray()
+    for g in groups:
+        for k, p in enumerate(g):
+            tag = struct.pack("<4I", len(p) | (0x8000 if k == len(g) - 1 else 0), 0x301E4000, 0x412, 0)  # tri strip, ST RGBAQ XYZ2
+            out += struct.pack("<I", 0x01000404)  # STCYCL
+            if k == 0:
+                out += struct.pack("<I4I4I", 0x6C038000, 1, 0x10000000, 6, 0, tex0[0], tex0[1], 0x3C, 0x00800000) + tag
+                addr = 3
+            else:
+                out += struct.pack("<I", 0x6C018000 | addr) + tag
+                addr += 1
+            out += struct.pack("<I", 0x6D008000 | (len(p) * 4) << 16 | addr)
+            out += struct.pack("<%dh" % (len(p) * 16), *[x for v in p for e in v for x in e])
+            addr += len(p) * 4
+        out += struct.pack("<I", 0x17000000)  # MSCNT
+    out += bytes(-len(out) % 16 + 16)
+    return b"PM22" + struct.pack("<III", sum(map(len, parts)), len(out) + 24, len(groups)) + bytes(8) + out
+
+
 def strips(batches, quads, pad):
     """Vertex lists for batches of the given sizes, holding quads (each 4 corners in order around the face, with
     (p1-p0)x(p3-p0) pointing inwards) as strips joined by zero-area triangles; a 3-vertex batch takes half a quad. Batches left over
