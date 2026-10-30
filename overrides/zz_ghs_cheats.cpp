@@ -637,8 +637,9 @@ namespace ghs_cheats
     // Guests (found 2026-10-23 with zz_ghs_actor_trace.cpp and RAM dumps, Catherine outside the AAA save room): the guest
     // dispatcher FUN_140730 runs a guest's AI by her flags (actor +0x08): 0x2000 the hunting AI FUN_1BFD60, 0x1000 the
     // calm one FUN_1BE690 (after her catch). The hunting AI spots the player with the vision cone test FUN_1CB760(guest, 0)
-    // (from 0x1C033C and, while she looks around, FUN_1CCC50; trace 2026-10-23), hears him through 0x47F13C = 3, also
-    // reads 0x47F184; then her sight counter +0x688 = 100 and +0x690 pursue. A catch is FUN_1C1010(guest) from the
+    // (from 0x1C033C and, while she looks around, FUN_1CCC50; trace 2026-10-23), and out of sight goes after him on
+    // 0x47F13C = 3 (a player action that also hides him from vision tests) or 0x47F184 = 2 (peeping through a keyhole);
+    // then her sight counter +0x688 = 100 and +0x690 pursue. A catch is FUN_1C1010(guest) from the
     // hunting AI, or the player's contact check (FUN_14ABF0 after
     // FUN_156FB0 = 3, talk partner gp+0x8D0 = 0x96); both start the encounter FUN_217970(guest, 0) (0x4505B0 = 1, guest
     // in 0x4505B4: dialogue, injection, gauge drop).
@@ -736,6 +737,31 @@ namespace ghs_cheats
             std::fprintf(stderr, "[GHS-CHEAT] guest %u: vision test %u answered 'not seen'\n", getRegU32(ctx, 4), g_blocked);
         SET_GPR_U32(ctx, 2, 0u);
         returnToCaller(ctx);
+    }
+    // Every sense goes through the awareness check FUN_1CCC50(guest, a1, ...) (a1 == 0 only sets her "?"/"!" emote):
+    // 100 seen (FUN_1CB760), 110 the player right next to her, 0xC8-0xD4 his noise in her room or through its doors
+    // (FUN_1CC5F0, by his action 0x47F144), 0x12D-0x136 a random "hears him" by distance (FUN_1CC2E0). The dispatcher
+    // FUN_140730 runs it for every guest itself (0x140C14, the result to the reaction FUN_1C5430), outside the AIs above,
+    // so hearing and noise still turned guests to the player (found 2026-10-30). An unnoticed guest notices nothing.
+    PS2Runtime::RecompiledFunction g_aware = nullptr;
+    void aware(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (getRegU32(ctx, 5) == 0u || !unnoticed(getRegU32(ctx, 4)))
+            return g_aware(rdram, ctx, runtime);
+        SET_GPR_U32(ctx, 2, 0u);
+        returnToCaller(ctx);
+    }
+    // Keyhole peeping (FUN_19E2E0 / FUN_19EB00, 0x47F184 = 2): the peep view's movement adds up in gp+0x18B8 / 0x18BC
+    // (two floats); FUN_1A0530 turns a fast look into a door rattle (sound 0x71 loud / 0x72 soft, level 0x450A78), and
+    // each guest within 640 of the keyhole may notice the peeper (FUN_1C1B50) or come searching (FUN_1C56A0). Under no
+    // detection the movement is wiped first: no rattle, nothing to hear (found 2026-10-30).
+    constexpr uint32_t kPeepLook = 0x0043D028u;
+    PS2Runtime::RecompiledFunction g_peepNoise = nullptr;
+    void peepNoise(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (noDetect())
+            std::memset(rdram + kPeepLook, 0, 8);
+        g_peepNoise(rdram, ctx, runtime);
     }
 
     // GHS-TRACE (screwdriver quest, 2026-10-24): FUN_2567F0(id) = "key item id is equipped" (0x450710), FUN_256680(id)
@@ -887,6 +913,10 @@ namespace ghs_cheats
             runtime.replaceFunction(0x00276050u, &contact);
         if ((g_sees = runtime.lookupFunction(0x001CB760u)))
             runtime.replaceFunction(0x001CB760u, &sees);
+        if ((g_aware = runtime.lookupFunction(0x001CCC50u)))
+            runtime.replaceFunction(0x001CCC50u, &aware);
+        if ((g_peepNoise = runtime.lookupFunction(0x001A0530u)))
+            runtime.replaceFunction(0x001A0530u, &peepNoise);
         if ((g_equipped = runtime.lookupFunction(0x002567F0u)))
             runtime.replaceFunction(0x002567F0u, &equipped);
         if ((g_holds = runtime.lookupFunction(0x00256680u)))

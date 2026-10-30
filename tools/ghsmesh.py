@@ -73,10 +73,12 @@ def texture(data):
     return struct.unpack_from("<II", data, t)
 
 
-def build(strip_list, tex0):
+def build(strip_list, tex0, floats=False):
     """A new PM22 mesh (any shape) from triangle strips (vertex lists as vertices() returns them for PM22, wound as
     above) with one texture (tex0 as texture() returns it). Long strips are split; groups hold up to 40 vertices,
-    the most the game's own meshes put in one VU buffer."""
+    the most the game's own meshes put in one VU buffer.
+    floats: the 'PM2\\x12' kind instead (some menu models): the same layout with every vertex as 4 float quads,
+    position / 1024 (w 0), normal (w 1), colour, s t; a batch's header, tag and vertices in one UNPACK V4-32."""
     parts = []
     for s in strip_list:
         while len(s) > 40:
@@ -95,6 +97,14 @@ def build(strip_list, tex0):
         for k, p in enumerate(g):
             tag = struct.pack("<4I", len(p) | (0x8000 if k == len(g) - 1 else 0), 0x301E4000, 0x412, 0)  # tri strip, ST RGBAQ XYZ2
             out += struct.pack("<I", 0x01000404)  # STCYCL
+            if floats:
+                head = (struct.pack("<4I4I", 1, 0x10000000, 6, 0, tex0[0], tex0[1], 0x3C, 0x00800000) if k == 0 else b"") + tag
+                n = len(head) // 16 + len(p) * 4
+                out += struct.pack("<I", 0x6C008000 | n << 16 | (0 if k == 0 else addr)) + head
+                out += b"".join(struct.pack("<16f", *[c / 1024 for c in pos[:3]], 0, *[c / 4096 for c in nrm[:3]], 1,
+                                            *col, st[0] / 4096, st[1] / 4096, 0, 0) for pos, nrm, col, st in p)
+                addr = (0 if k == 0 else addr) + n
+                continue
             if k == 0:
                 out += struct.pack("<I4I4I", 0x6C038000, 1, 0x10000000, 6, 0, tex0[0], tex0[1], 0x3C, 0x00800000) + tag
                 addr = 3
@@ -106,7 +116,7 @@ def build(strip_list, tex0):
             addr += len(p) * 4
         out += struct.pack("<I", 0x17000000)  # MSCNT
     out += bytes(-len(out) % 16 + 16)
-    return b"PM22" + struct.pack("<III", sum(map(len, parts)), len(out) + 24, len(groups)) + bytes(8) + out
+    return (b"PM2\x12" if floats else b"PM22") + struct.pack("<III", sum(map(len, parts)), len(out) + 24, len(groups)) + bytes(8) + out
 
 
 def strips(batches, quads, pad):

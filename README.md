@@ -125,7 +125,7 @@ Besides playing the game natively:
 - **Controls**: rebindable keys, controllers with vibration, **mouse look** in first-person view and when peeping
   through keyholes.
 - **Cheats (F5)**: infinite mental gauge, infinite items, invulnerability, no detection (guests don't see, hear or
-  notice you; equipping a story item that a guest has to react to, such as the screwdriver, switches it off),
+  notice you, and peeping through keyholes makes no noise; equipping a story item that a guest has to react to, such as the screwdriver, switches it off),
   permanent Speed Up, no conditions, in-game clock speed, Roulette spin results, give/remove items, a **guest radar**
   overlay, and **warp** to any room.
 - **Item randomizer (F5)**: shuffles where items lie, optionally moves them to completely new spots in other rooms,
@@ -183,7 +183,19 @@ on, in name order (a later mod wins); without mods it puts the original back. In
   pixel exact at 22 px; like the game, `&` draws `#`, `+` and `` ` `` the curly quotes, `$ ^ _ { } |` the symbols).
 - **Items and props:** `ghsmesh.build` writes a whole new rigid mesh (any shape, one texture). Example:
   `py tools\mod_miku_doll.py` writes `mods\miku doll`, the Doll item (for Lost Doll) as a chibi Hatsune Miku: its model
-  in the hotel (`041\020.slid`) and on the shop's shelf (`093.slid` `095.bin`/`096`).
+  in the hotel (`041\020.slid`), on the shop's shelf (`093.slid` `095.bin`/`096`) and in the item model set `005`
+  (`007.bin`, float vertices: `ghsmesh.build(..., floats=True)`; `017.slid.bin`), plus its picture in the inventory
+  and the HUD (`006\134.slid.bin`, item 134 of the item pictures; the same set is again in `236`, `256` and `276`),
+  rendered from the new model.
+- **Lost Doll's crush** (behaviour, after the manga *GHS: Another World*): `mods\lost doll crush` (switch it on and
+  press **Restart**). The first time Lost Doll spots you, or catches you while she mulls in front of room 205, she
+  doesn't catch you. She stares, glances away, stares again, whispers "It must be love..." and runs back to her room. Her mutterings, which you hear when you peep at her, become
+  love lines (`lost_doll_love.txt`). Until you take her soul she otherwise keeps her usual routine, which her soul quest
+  needs. After that she follows you from room to room, except to her own rooms. Until she's angry she's too shy to
+  catch you: when she spots or touches you in the room you're in (your guest room too), she flees instead. Leaving a
+  room she's in with you counts as rejecting her, and a minute together forgives one rejection. After three she gets angry and hunts you until she
+  catches you. The code is `overrides\zz_ghs_doll_crush.cpp`. The following is off while the guest shuffle is on. The
+  first-sight scene and her mood reset when the game starts.
 
 ## Where things are
 

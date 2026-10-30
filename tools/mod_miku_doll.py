@@ -1,21 +1,26 @@
 """Writes the mod "mods\\miku doll": the Doll item (the one for Lost Doll; bought in the shop) as a sitting chibi
-Hatsune Miku, a new model (tools\\ghsmesh.py build) and texture. The doll is in FILE.STM twice, with the same model
-and texture: 041\\020.slid (lying in the hotel: 000.bin texture, 001\\000.bin model) and 093.slid (the shop's
-shelf: 095.bin texture as a GS upload packet, 096\\000.bin model).
+Hatsune Miku, a new model (tools\\ghsmesh.py build) and texture. The doll is in FILE.STM three times, with the same
+model and texture: 041\\020.slid (lying in the hotel: 000.bin texture, 001\\000.bin model), 093.slid (the shop's
+shelf: 095.bin texture as a GS upload packet, 096\\000.bin model) and 005 (a set of ten item models with float
+vertices: 007.bin model, 017.slid.bin texture).
 Model units: y grows downwards (the floor is y 0), the doll faces -z. The texture is 64x64, 16 colours: the face
 (front half of the head, projected flat) in the top 48 rows, below it one 4x4 swatch per colour for everything else.
   python tools\\mod_miku_doll.py      (needs game\\FILE.STM.orig or game\\FILE.STM; then build the mods)
 """
 import math
 import os
+import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ghsarc
 import ghsmesh
+import ghstex
 
 WORLD = ("041", "020.slid")
 SHOP_TEX, SHOP_MODEL = ("093.slid", "095.bin"), ("093.slid", "096", "000.bin")
+MENU_TEX, MENU_MODEL = ("005", "017.slid.bin"), ("005", "007.bin")
+PICTURES = [(top, "134.slid.bin") for top in ("006", "236", "256", "276")]  # item 134's picture, in four copies of the set
 MAX_VERTICES = 686  # the original doll's; the game may size buffers by it
 
 PALETTE = [  # name: RGB
@@ -191,6 +196,52 @@ def write_texture(data, palette_at, pixels_at, px):
     return bytes(buf)
 
 
+def picture(strips, px, size=64, ss=4, pitch=0.35):
+    """The item picture (inventory, HUD): the doll from the front and a little above, RGBA, clear background."""
+    rgb = [PALETTE[k][1] for k in px]
+    c, s = math.cos(pitch), math.sin(pitch)
+    tris = []
+    for strip in strips:
+        pts = [((x, y * c - z * s, y * s + z * c), col[0] / 128, st) for (x, y, z, _), _, col, st in strip]
+        for i in range(len(strip) - 2):
+            a, b, d = pts[i:i + 3]
+            n = cross([b[0][k] - a[0][k] for k in range(3)], [d[0][k] - a[0][k] for k in range(3)])
+            if (n[2] if i % 2 == 0 else -n[2]) > 0:  # even triangles' cross points inwards: this one faces the viewer
+                tris.append((a, b, d))
+    xs = [p[0][0] for t in tris for p in t]
+    ys = [p[0][1] for t in tris for p in t]
+    W = size * ss
+    scale = (W - 4 * ss) / max(max(xs) - min(xs), max(ys) - min(ys))
+    ox, oy = (W - (max(xs) - min(xs)) * scale) / 2 - min(xs) * scale, (W - (max(ys) - min(ys)) * scale) / 2 - min(ys) * scale
+    depth, img = [1e9] * (W * W), [None] * (W * W)
+    for t in tris:
+        (ax, ay), (bx, by), (cx, cy) = [(p[0][0] * scale + ox, p[0][1] * scale + oy) for p in t]
+        den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+        if abs(den) < 1e-9:
+            continue
+        for y in range(max(0, int(min(ay, by, cy))), min(W, int(max(ay, by, cy)) + 1)):
+            for x in range(max(0, int(min(ax, bx, cx))), min(W, int(max(ax, bx, cx)) + 1)):
+                w0 = ((by - cy) * (x + 0.5 - cx) + (cx - bx) * (y + 0.5 - cy)) / den
+                w1 = ((cy - ay) * (x + 0.5 - cx) + (ax - cx) * (y + 0.5 - cy)) / den
+                w2 = 1 - w0 - w1
+                if w0 < 0 or w1 < 0 or w2 < 0:
+                    continue
+                z = w0 * t[0][0][2] + w1 * t[1][0][2] + w2 * t[2][0][2]
+                if z < depth[y * W + x]:
+                    u = (w0 * t[0][2][0] + w1 * t[1][2][0] + w2 * t[2][2][0]) / 64
+                    v = (w0 * t[0][2][1] + w1 * t[1][2][1] + w2 * t[2][2][1]) / 64
+                    shade = w0 * t[0][1] + w1 * t[1][1] + w2 * t[2][1]
+                    depth[y * W + x] = z
+                    img[y * W + x] = [min(255, ch * shade) for ch in rgb[min(63, int(v)) * 64 + min(63, int(u))]]
+    out = bytearray()
+    for y in range(size):
+        for x in range(size):
+            cell = [img[(y * ss + j) * W + x * ss + i] for j in range(ss) for i in range(ss)]
+            hit = [p for p in cell if p]
+            out += bytes([round(sum(p[k] for p in hit) / len(hit)) for k in range(3)] + [255 * len(hit) // len(cell)]) if hit else bytes(4)
+    return bytes(out)
+
+
 def main():
     with open(ghsarc.GAME_FILE_STM + ".orig" if os.path.exists(ghsarc.GAME_FILE_STM + ".orig") else ghsarc.GAME_FILE_STM, "rb") as f:
         stm = f.read()
@@ -198,21 +249,29 @@ def main():
     if model != ghsarc.get(stm, SHOP_MODEL):
         raise SystemExit("the doll's two models differ: not the expected game files")
     mesh = ghsmesh.build(miku(), ghsmesh.texture(model))
+    menu_model = ghsarc.get(stm, MENU_MODEL)
+    menu_mesh = ghsmesh.build(miku(), struct.unpack_from("<II", menu_model, 0x30), floats=True)  # its first TEX0
     count, size = int.from_bytes(mesh[4:8], "little"), len(mesh)
-    if count > MAX_VERTICES or size > len(model):
-        raise SystemExit("the new doll is bigger than the old (%d vertices, %d bytes)" % (count, size))
+    if count > MAX_VERTICES or size > len(model) or len(menu_mesh) > len(menu_model) or menu_model[:8] != b"PM2\x12\xae\x02\0\0":
+        raise SystemExit("the new doll is bigger than the old, or the menu doll is not where expected")
     px = texture()
     world_tex, shop_tex = ghsarc.get(stm, WORLD + ("000.bin",)), ghsarc.get(stm, SHOP_TEX)
-    if len(world_tex) != 2144 or len(shop_tex) != 2464 or world_tex[16:80] != shop_tex[0x90:0xD0]:
+    if len(world_tex) != 2144 or len(shop_tex) != 2464 or world_tex[16:80] != shop_tex[0x90:0xD0] or ghsarc.get(stm, MENU_TEX) != world_tex:
         raise SystemExit("the doll's textures are not where expected")
     out = os.path.join(ghsarc.ROOT, "mods", "miku doll")
     files = {WORLD + ("001", "000.bin"): mesh, SHOP_MODEL: mesh,
-             WORLD + ("000.bin",): write_texture(world_tex, 16, 96, px), SHOP_TEX: write_texture(shop_tex, 0x90, 0x180, px)}
+             WORLD + ("000.bin",): write_texture(world_tex, 16, 96, px), SHOP_TEX: write_texture(shop_tex, 0x90, 0x180, px),
+             MENU_MODEL: menu_mesh, MENU_TEX: write_texture(world_tex, 16, 96, px)}
     for path, data in files.items():
         dst = os.path.join(out, "FILE.STM", *path)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         with open(dst, "wb") as f:
             f.write(data)
+    icon = picture(miku(), px)
+    for path in PICTURES:
+        ghsarc.get(stm, path)  # KeyError: not the expected game files
+        os.makedirs(os.path.join(out, "FILE.STM", *path[:-1]), exist_ok=True)
+        ghstex.write_png(os.path.join(out, "FILE.STM", *path[:-1], path[-1] + ".tex0.png"), 64, 64, icon)
     with open(os.path.join(out, "readme.txt"), "w", encoding="utf-8") as f:
         f.write("The Doll item (for Lost Doll, sold in the shop) as a chibi Hatsune Miku.\n"
                 "Made by tools\\mod_miku_doll.py from your game files (run it again to remake it).\n")
