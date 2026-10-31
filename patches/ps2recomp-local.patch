@@ -2564,10 +2564,10 @@ index 0000000..859f73e
 +file(WRITE "${OUT}" "${out}")
 diff --git a/ps2xRuntime/include/ghs_cheats.h b/ps2xRuntime/include/ghs_cheats.h
 new file mode 100644
-index 0000000..ae4fe95
+index 0000000..e3a0f23
 --- /dev/null
 +++ b/ps2xRuntime/include/ghs_cheats.h
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,67 @@
 +// GHS: cheats (F5, ps2_debug_panel.cpp). The game-specific side (overrides\zz_ghs_cheats.cpp, in the runner) reads
 +// these once a frame on the game thread and changes EE RAM.
 +#pragma once
@@ -2582,6 +2582,14 @@ index 0000000..ae4fe95
 +    int slot;
 +    uint32_t flags;
 +    float x, z;
++};
++
++// One timetable entry for the pinned memo: clock times (1200 = 12:00), the room, whether the guest is on it now.
++struct GhsVisitView
++{
++    int16_t start, end;
++    int room;
++    bool now;
 +};
 +
 +struct GhsCheats
@@ -2616,6 +2624,15 @@ index 0000000..ae4fe95
 +    std::array<GhsGuestView, 64> guests{};
 +    int guestCount = 0;
 +    float playerX = 0.0f, playerZ = 0.0f;
++    // The pinned memo: the guests with a timetable tonight and memoSlot's table (filled under radarLock).
++    std::atomic<bool> memo{false};
++    std::atomic<bool> guestLocation{false}; // the memo also marks the room the guest is in now (memoRoom)
++    std::atomic<int> memoSlot{0};           // the guest shown (actor slot; 0 none)
++    std::array<int, 64> memoGuests{};
++    int memoGuestCount = 0;
++    std::array<GhsVisitView, 40> memoVisits{};
++    int memoVisitCount = 0;
++    int memoRoom = -1;
 +};
 +extern GhsCheats g_ghsCheats;
 diff --git a/ps2xRuntime/include/runtime/ee_scheduler.h b/ps2xRuntime/include/runtime/ee_scheduler.h
@@ -16713,7 +16730,7 @@ index a8f9fa8..f114e1c 100644
  
  
 diff --git a/ps2xRuntime/src/lib/ps2_debug_panel.cpp b/ps2xRuntime/src/lib/ps2_debug_panel.cpp
-index c9aa2c6..c145355 100644
+index c9aa2c6..0086bb2 100644
 --- a/ps2xRuntime/src/lib/ps2_debug_panel.cpp
 +++ b/ps2xRuntime/src/lib/ps2_debug_panel.cpp
 @@ -9,6 +9,8 @@
@@ -16735,7 +16752,7 @@ index c9aa2c6..c145355 100644
  #include <cstdint>
  #include <cstdio>
  #include <cstring>
-@@ -2176,6 +2180,534 @@ namespace
+@@ -2176,6 +2180,645 @@ namespace
  
  #endif
  }
@@ -16910,6 +16927,94 @@ index c9aa2c6..c145355 100644
 +    }
 +    // F5: cheats (ghs_cheats.h; the game side is overrides\zz_ghs_cheats.cpp). Item names from ghs_items.txt next to
 +    // the game (tools\ghs_item_names.py writes it from the game's own text), else numbers.
++    // A guest is identified by her actor slot alone (no character number in the actor). Slots confirmed in play
++    // (user, 2026-10-23); the rest show as "Guest <slot>" until someone recognises them.
++    const char *ghsGuestName(int slot)
++    {
++        static const std::pair<int, const char *> kNames[] = {{1, "Gregory"},      {2, "Judgment Boy"}, {4, "Lost Doll"},
++                                                              {5, "Hell's Chef"},  {6, "Catherine"},    {7, "Mummy Papa"},
++                                                              {8, "Mummy Dog"},    {9, "Cactus Gunman"}, {11, "TV-Fish"},
++                                                              {14, "Roulette Boy"}, {18, "James"},      {25, "Frog (save)"}};
++        for (const auto &[s, n] : kNames)
++            if (s == slot)
++                return n;
++        return nullptr;
++    }
++
++    // Pinned memo (F5): the chosen guest's timetable tonight as in the game's memo, without the profile and text: one
++    // block per visit from start to end, with the room number; the entry she is on is outlined. "Show guest location"
++    // adds a red dot by it, with the room she is really in when that isn't the planned one.
++    void ghsDrawMemo()
++    {
++        std::array<GhsVisitView, 40> visits;
++        int count, room;
++        {
++            std::lock_guard<std::mutex> lock(g_ghsCheats.radarLock);
++            visits = g_ghsCheats.memoVisits;
++            count = g_ghsCheats.memoVisitCount;
++            room = g_ghsCheats.memoRoom;
++        }
++        if (count == 0)
++            return;
++        // Right side, under the game's clock and above the radar; click-through and see-through.
++        ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 10.0f, ImGui::GetIO().DisplaySize.y * 0.3f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
++        ImGui::SetNextWindowBgAlpha(0.0f);
++        const ImGuiWindowFlags flags = ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing |
++                                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration;
++        if (!ImGui::Begin("##memo", nullptr, flags))
++            return ImGui::End();
++        constexpr float kHeight = 240.0f, kLabels = 38.0f, kBlock = 70.0f;
++        const auto minutes = [](int hhmm) { return (hhmm / 100) * 60 + hhmm % 100; };
++        const int first = minutes(visits[0].start);
++        const auto offset = [&](int hhmm) { return (minutes(hhmm) - first + 1440) % 1440; }; // the night may pass 0:00
++        int total = offset(visits[static_cast<size_t>(count - 1)].end);
++        if (total == 0)
++            total = 1440;
++        const ImVec2 origin = ImGui::GetCursorScreenPos();
++        const auto y = [&](int minute) { return origin.y + kHeight * static_cast<float>(minute) / static_cast<float>(total); };
++        ImDrawList *draw = ImGui::GetWindowDrawList();
++        const ImU32 line = IM_COL32(255, 255, 255, 110), shadow = IM_COL32(0, 0, 0, 200);
++        draw->AddLine(ImVec2(origin.x + kLabels, origin.y), ImVec2(origin.x + kLabels, origin.y + kHeight), line);
++        for (int m = (60 - first % 60) % 60; m <= total; m += 60) // a tick each full hour, a time every third
++        {
++            const int hour = (first + m) / 60 % 24;
++            draw->AddLine(ImVec2(origin.x + kLabels - 4.0f, y(m)), ImVec2(origin.x + kLabels, y(m)), line);
++            if (hour % 3 == 0)
++            {
++                char text[8];
++                std::snprintf(text, sizeof(text), "%d:00", hour);
++                draw->AddText(ImVec2(origin.x + 1.0f, y(m) - 6.0f), shadow, text);
++                draw->AddText(ImVec2(origin.x, y(m) - 7.0f), IM_COL32(255, 255, 255, 220), text);
++            }
++        }
++        const bool location = g_ghsCheats.guestLocation.load();
++        for (int i = 0; i < count; ++i)
++        {
++            const GhsVisitView &v = visits[static_cast<size_t>(i)];
++            const float top = y(offset(v.start)), bottom = y(offset(v.end) == 0 ? total : offset(v.end));
++            const ImVec2 a(origin.x + kLabels + 3.0f, top + 1.0f), b(origin.x + kLabels + 3.0f + kBlock, bottom - 1.0f);
++            draw->AddRectFilled(a, b, ImColor::HSV(std::fmod(v.room * 0.37f, 1.0f), 0.55f, 0.85f, 0.6f), 3.0f);
++            char text[8];
++            std::snprintf(text, sizeof(text), "%d", v.room);
++            if (b.y - a.y >= 14.0f)
++                draw->AddText(ImVec2(a.x + 4.0f, a.y + 1.0f), IM_COL32(255, 255, 255, 255), text);
++            if (!v.now)
++                continue;
++            draw->AddRect(a, b, IM_COL32(255, 255, 255, 255), 3.0f, 0, 2.0f);
++            if (!location)
++                continue;
++            const ImVec2 dot(b.x + 8.0f, (a.y + b.y) * 0.5f);
++            draw->AddCircleFilled(dot, 5.0f, IM_COL32(235, 60, 50, 255));
++            if (room != v.room)
++            {
++                std::snprintf(text, sizeof(text), "%d", room);
++                draw->AddText(ImVec2(dot.x + 8.0f, dot.y - 7.0f), IM_COL32(235, 60, 50, 255), text);
++            }
++        }
++        ImGui::Dummy(ImVec2(kLabels + kBlock + 40.0f, kHeight));
++        ImGui::End();
++    }
++
 +    // Guest radar (F5 checkbox): a click-through overlay with each guest's slot, AI mode and distance, and a top-down
 +    // map around the player (north up, world x/z). The game side (zz_ghs_cheats.cpp) fills g_ghsCheats.guests.
 +    void ghsDrawRadar()
@@ -16923,12 +17028,6 @@ index c9aa2c6..c145355 100644
 +        static const Mode kModes[] = {{0x2000u, "hunting", IM_COL32(235, 70, 60, 255)},
 +                                      {0x8000u, "searching", IM_COL32(240, 160, 40, 255)},
 +                                      {0x1000u, "calm", IM_COL32(90, 200, 90, 255)}};
-+        // A guest is identified by her actor slot alone (no character number in the actor). Slots confirmed in play
-+        // (user, 2026-10-23); the rest show as "Guest <slot>" until someone recognises them.
-+        static const std::pair<int, const char *> kNames[] = {{1, "Gregory"},      {2, "Judgment Boy"}, {4, "Lost Doll"},
-+                                                              {5, "Hell's Chef"},  {6, "Catherine"},    {7, "Mummy Papa"},
-+                                                              {8, "Mummy Dog"},    {9, "Cactus Gunman"}, {11, "TV-Fish"},
-+                                                              {14, "Roulette Boy"}, {18, "James"},      {25, "Frog (save)"}};
 +        constexpr uint32_t kGuestModeBits = 0x1000u | 0x2000u | 0x8000u; // calm, hunting, searching
 +        std::array<GhsGuestView, 64> guests;
 +        int count;
@@ -16958,10 +17057,7 @@ index c9aa2c6..c145355 100644
 +        for (int i = 0; i < count; ++i)
 +        {
 +            const GhsGuestView &g = guests[static_cast<size_t>(i)];
-+            const char *known = nullptr;
-+            for (const auto &[slot, n] : kNames)
-+                if (slot == g.slot)
-+                    known = n;
++            const char *known = ghsGuestName(g.slot);
 +            if (!known && (g.flags & kGuestModeBits) == 0u) // props and the like
 +                continue;
 +            char unknown[16];
@@ -17028,6 +17124,38 @@ index c9aa2c6..c145355 100644
 +            check("Invulnerability (guests can't catch you)", g_ghsCheats.invulnerable);
 +            check("No detection (guests don't see or hear you)", g_ghsCheats.noDetection);
 +            check("Guest radar (overlay: slot, mode, distance)", g_ghsCheats.radar);
++            check("Pinned memo (a guest's schedule tonight)", g_ghsCheats.memo);
++            if (g_ghsCheats.memo.load())
++            {
++                std::array<int, 64> guests;
++                int count;
++                {
++                    std::lock_guard<std::mutex> lock(g_ghsCheats.radarLock);
++                    guests = g_ghsCheats.memoGuests;
++                    count = g_ghsCheats.memoGuestCount;
++                }
++                const auto name = [](int slot)
++                {
++                    static char unknown[16];
++                    if (const char *known = ghsGuestName(slot))
++                        return known;
++                    std::snprintf(unknown, sizeof(unknown), "Guest %d", slot);
++                    return static_cast<const char *>(unknown);
++                };
++                const int slot = g_ghsCheats.memoSlot.load();
++                ImGui::Indent();
++                if (count == 0)
++                    ImGui::TextDisabled("no timetables (not in play)");
++                else if (ImGui::BeginCombo("Guest##memo", slot > 0 ? name(slot) : "(choose a guest)"))
++                {
++                    for (int i = 0; i < count; ++i)
++                        if (ImGui::Selectable(name(guests[static_cast<size_t>(i)]), guests[static_cast<size_t>(i)] == slot))
++                            g_ghsCheats.memoSlot = guests[static_cast<size_t>(i)];
++                    ImGui::EndCombo();
++                }
++                check("Show guest location (on the memo)", g_ghsCheats.guestLocation);
++                ImGui::Unindent();
++            }
 +            check("Permanent Speed Up (run fast)", g_ghsCheats.speedUp);
 +            check("No conditions (tiredness, headache, ... cured at once)", g_ghsCheats.noConditions);
 +            float scale = g_ghsCheats.timeScale.load();
@@ -17270,7 +17398,7 @@ index c9aa2c6..c145355 100644
  void PS2DebugPanel::initialize()
  {
  #if defined(PS2X_ENABLE_DEBUG_UI) && !defined(PLATFORM_VITA)
-@@ -2183,6 +2715,15 @@ void PS2DebugPanel::initialize()
+@@ -2183,6 +2826,15 @@ void PS2DebugPanel::initialize()
      {
          rlImGuiSetup(true);
          m_initialized = true;
@@ -17286,7 +17414,7 @@ index c9aa2c6..c145355 100644
      }
  #endif
  }
-@@ -2198,6 +2739,12 @@ void PS2DebugPanel::shutdown()
+@@ -2198,6 +2850,12 @@ void PS2DebugPanel::shutdown()
  #endif
  }
  
@@ -17299,7 +17427,7 @@ index c9aa2c6..c145355 100644
  void PS2DebugPanel::draw(PS2Runtime &runtime)
  {
  #if defined(PS2X_ENABLE_DEBUG_UI) && !defined(PLATFORM_VITA)
-@@ -2211,13 +2758,161 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
+@@ -2211,13 +2869,163 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
          toggleVisible();
      }
  
@@ -17379,8 +17507,8 @@ index c9aa2c6..c145355 100644
 +    if (captureCursor != IsCursorHidden())
 +        captureCursor ? DisableCursor() : EnableCursor();
 +
-+    const bool radar = g_ghsCheats.radar.load();
-+    if (!m_visible && !s_settingsVisible && !s_cheatsVisible && !radar && !snapToast)
++    const bool radar = g_ghsCheats.radar.load(), memo = g_ghsCheats.memo.load();
++    if (!m_visible && !s_settingsVisible && !s_cheatsVisible && !radar && !memo && !snapToast)
      {
          return;
      }
@@ -17398,6 +17526,8 @@ index c9aa2c6..c145355 100644
 +
 +    if (radar)
 +        ghsDrawRadar();
++    if (memo)
++        ghsDrawMemo();
 +
 +    if (s_cheatsVisible)
 +        ghsDrawCheats(&s_cheatsVisible);
@@ -17462,7 +17592,7 @@ index c9aa2c6..c145355 100644
      ImGui::SetNextWindowSize(ImVec2(780.0f, 620.0f), ImGuiCond_FirstUseEver);
      if (ImGui::Begin("Runtime Debugger", &m_visible, ImGuiWindowFlags_MenuBar))
      {
-@@ -2227,6 +2922,18 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
+@@ -2227,6 +3035,18 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
              ImGui::EndMenuBar();
          }
  

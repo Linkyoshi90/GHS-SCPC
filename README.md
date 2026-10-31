@@ -127,7 +127,8 @@ Besides playing the game natively:
 - **Cheats (F5)**: infinite mental gauge, infinite items, invulnerability, no detection (guests don't see, hear or
   notice you, and peeping through keyholes makes no noise; equipping a story item that a guest has to react to, such as the screwdriver, switches it off),
   permanent Speed Up, no conditions, in-game clock speed, Roulette spin results, give/remove items, a **guest radar**
-  overlay, and **warp** to any room.
+  overlay, a **pinned memo** (a guest's schedule tonight, chosen from a list, on the right side; with *Show guest
+  location* a red dot marks the room the guest is really in), and **warp** to any room.
 - **Item randomizer (F5)**: shuffles where items lie, optionally moves them to completely new spots in other rooms,
   and can shuffle which rooms the guests visit each night (their own rooms stay, so every soul can still be taken).
   Saving at the frog keeps the shuffle.

@@ -345,22 +345,25 @@ namespace ghs_cheats
         std::memcpy(&end, rdram + e + 2u, 2);
         return start >= 0 && start < 2400 && end >= 0 && end <= 2400 && (start != 0 || end != 0);
     }
+    std::vector<Visit> readTimetable(const uint8_t *rdram, uint32_t slot) // empty: no timetable tonight
+    {
+        uint32_t p;
+        std::memcpy(&p, rdram + kActors + slot * kActorBytes + 0xD8u, 4);
+        std::vector<Visit> t;
+        if (!timetableEntry(rdram, p))
+            return t;
+        for (int k = 0; k < 40 && timetableEntry(rdram, p - 16u) && rdram[p - 2u] + 1 == rdram[p + 14u]; ++k)
+            p -= 16u;
+        for (uint32_t k = 0; k < 40u && timetableEntry(rdram, p + 16u * k); ++k)
+            t.push_back({p + 16u * k, rdram[p + 16u * k + 4u]});
+        return t;
+    }
     std::vector<std::vector<Visit>> readTimetables(const uint8_t *rdram)
     {
         std::vector<std::vector<Visit>> tables;
         for (uint32_t slot = 1; slot < kGuests; ++slot)
-        {
-            uint32_t p;
-            std::memcpy(&p, rdram + kActors + slot * kActorBytes + 0xD8u, 4);
-            if (!timetableEntry(rdram, p))
-                continue;
-            for (int k = 0; k < 40 && timetableEntry(rdram, p - 16u) && rdram[p - 2u] + 1 == rdram[p + 14u]; ++k)
-                p -= 16u;
-            std::vector<Visit> t;
-            for (uint32_t k = 0; k < 40u && timetableEntry(rdram, p + 16u * k); ++k)
-                t.push_back({p + 16u * k, rdram[p + 16u * k + 4u]});
-            tables.push_back(std::move(t));
-        }
+            if (auto t = readTimetable(rdram, slot); !t.empty())
+                tables.push_back(std::move(t));
         return tables;
     }
     bool isPlace(const uint8_t *rdram, int room) // has a door list: a real room (7, 8 are codes, 7 = the guest's own room)
@@ -450,6 +453,38 @@ namespace ghs_cheats
         g_ghsCheats.guestCount = n;
         std::memcpy(&g_ghsCheats.playerX, rdram + kActors + 0x80, 4);
         std::memcpy(&g_ghsCheats.playerZ, rdram + kActors + 0x88, 4);
+    }
+
+    // Pinned memo: the guests with a timetable tonight, and the chosen one's table, the entry she is on (actor +0xD8)
+    // and the room she is in (actor +0x220).
+    void fillMemo(const uint8_t *rdram)
+    {
+        std::lock_guard<std::mutex> lock(g_ghsCheats.radarLock);
+        const uint32_t want = static_cast<uint32_t>(g_ghsCheats.memoSlot.load(std::memory_order_relaxed));
+        int guests = 0, visits = 0;
+        for (uint32_t slot = 1; slot < kGuests; ++slot)
+        {
+            const auto table = readTimetable(rdram, slot);
+            if (table.empty())
+                continue;
+            g_ghsCheats.memoGuests[static_cast<size_t>(guests++)] = static_cast<int>(slot);
+            if (slot != want)
+                continue;
+            const uint8_t *actor = rdram + kActors + slot * kActorBytes;
+            uint32_t now;
+            std::memcpy(&now, actor + 0xD8u, 4);
+            for (const Visit &v : table)
+            {
+                GhsVisitView &out = g_ghsCheats.memoVisits[static_cast<size_t>(visits++)];
+                std::memcpy(&out.start, rdram + v.entry, 2);
+                std::memcpy(&out.end, rdram + v.entry + 2u, 2);
+                out.room = v.room;
+                out.now = v.entry == now;
+            }
+            g_ghsCheats.memoRoom = actor[0x220];
+        }
+        g_ghsCheats.memoGuestCount = guests;
+        g_ghsCheats.memoVisitCount = visits;
     }
 
     // Timed effects (found 2026-10-24 by using a Speed Up and RAM diffs): FUN_1A4A50(i) keeps effect i, flag byte
@@ -585,6 +620,8 @@ namespace ghs_cheats
         applyEffects(rdram);
         if (g_ghsCheats.radar.load(std::memory_order_relaxed))
             fillRadar(rdram);
+        if (g_ghsCheats.memo.load(std::memory_order_relaxed))
+            fillMemo(rdram);
         if (g_ghsCheats.infiniteHealth.load(std::memory_order_relaxed))
             std::memcpy(rdram + kGauge, rdram + kGaugeMax, 4);
         g_items.apply(rdram, g_ghsCheats.infiniteItems.load(std::memory_order_relaxed));
