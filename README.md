@@ -128,7 +128,9 @@ Besides playing the game natively:
   notice you, and peeping through keyholes makes no noise; equipping a story item that a guest has to react to, such as the screwdriver, switches it off),
   permanent Speed Up, no conditions, in-game clock speed, Roulette spin results, give/remove items, a **guest radar**
   overlay, a **pinned memo** (a guest's schedule tonight, chosen from a list, on the right side; with *Show guest
-  location* a red dot marks the room the guest is really in), and **warp** to any room.
+  location* it says which room the guest is really in), and **warp** to any room. The game has no room names (its room
+  numbers aren't the ones on the doors): name rooms in `game\ghs_rooms.txt`, one `number;name` line each (for
+  example `1;hallway 1F`), with the number F5 → Warp shows for the room you're in.
 - **Item randomizer (F5)**: shuffles where items lie, optionally moves them to completely new spots in other rooms,
   and can shuffle which rooms the guests visit each night (their own rooms stay, so every soul can still be taken).
   Saving at the frog keeps the shuffle.

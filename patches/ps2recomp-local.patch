@@ -16730,7 +16730,7 @@ index a8f9fa8..f114e1c 100644
  
  
 diff --git a/ps2xRuntime/src/lib/ps2_debug_panel.cpp b/ps2xRuntime/src/lib/ps2_debug_panel.cpp
-index c9aa2c6..0086bb2 100644
+index c9aa2c6..5387c3e 100644
 --- a/ps2xRuntime/src/lib/ps2_debug_panel.cpp
 +++ b/ps2xRuntime/src/lib/ps2_debug_panel.cpp
 @@ -9,6 +9,8 @@
@@ -16752,7 +16752,15 @@ index c9aa2c6..0086bb2 100644
  #include <cstdint>
  #include <cstdio>
  #include <cstring>
-@@ -2176,6 +2180,645 @@ namespace
+@@ -27,6 +31,7 @@
+ #include <iomanip>
+ #include <mutex>
+ #include <sstream>
++#include <map>
+ #include <string>
+ #include <vector>
+ 
+@@ -2176,6 +2181,671 @@ namespace
  
  #endif
  }
@@ -16941,9 +16949,36 @@ index c9aa2c6..0086bb2 100644
 +        return nullptr;
 +    }
 +
++    // Room names: the game has no name table (its room numbers aren't the door plates), so they are ours: a few known
++    // here, more in ghs_rooms.txt next to the game (lines "room;name", the number as F5 -> Warp shows it).
++    const char *ghsRoomName(int room)
++    {
++        static std::map<int, std::string> s_names;
++        static bool s_loaded = false;
++        if (!s_loaded)
++        {
++            s_loaded = true;
++            s_names = {{1, "Hallway by room 101"}, {50, "Frog's room (save)"}, {53, "Courtyard"}, {72, "Gregory's Horror Shop"}, {104, "Western town"}};
++            if (FILE *f = std::fopen("ghs_rooms.txt", "r"))
++            {
++                char line[128];
++                while (std::fgets(line, sizeof(line), f))
++                {
++                    int id = -1;
++                    char name[100] = {};
++                    if (std::sscanf(line, "%d;%99[^\r\n]", &id, name) == 2 && id >= 0 && id < 256)
++                        s_names[id] = name;
++                }
++                std::fclose(f);
++            }
++        }
++        const auto it = s_names.find(room);
++        return it != s_names.end() ? it->second.c_str() : nullptr;
++    }
++
 +    // Pinned memo (F5): the chosen guest's timetable tonight as in the game's memo, without the profile and text: one
 +    // block per visit from start to end, with the room number; the entry she is on is outlined. "Show guest location"
-+    // adds a red dot by it, with the room she is really in when that isn't the planned one.
++    // writes the room she is really in under it.
 +    void ghsDrawMemo()
 +    {
 +        std::array<GhsVisitView, 40> visits;
@@ -16987,7 +17022,6 @@ index c9aa2c6..0086bb2 100644
 +                draw->AddText(ImVec2(origin.x, y(m) - 7.0f), IM_COL32(255, 255, 255, 220), text);
 +            }
 +        }
-+        const bool location = g_ghsCheats.guestLocation.load();
 +        for (int i = 0; i < count; ++i)
 +        {
 +            const GhsVisitView &v = visits[static_cast<size_t>(i)];
@@ -16998,20 +17032,21 @@ index c9aa2c6..0086bb2 100644
 +            std::snprintf(text, sizeof(text), "%d", v.room);
 +            if (b.y - a.y >= 14.0f)
 +                draw->AddText(ImVec2(a.x + 4.0f, a.y + 1.0f), IM_COL32(255, 255, 255, 255), text);
-+            if (!v.now)
-+                continue;
-+            draw->AddRect(a, b, IM_COL32(255, 255, 255, 255), 3.0f, 0, 2.0f);
-+            if (!location)
-+                continue;
-+            const ImVec2 dot(b.x + 8.0f, (a.y + b.y) * 0.5f);
-+            draw->AddCircleFilled(dot, 5.0f, IM_COL32(235, 60, 50, 255));
-+            if (room != v.room)
-+            {
-+                std::snprintf(text, sizeof(text), "%d", room);
-+                draw->AddText(ImVec2(dot.x + 8.0f, dot.y - 7.0f), IM_COL32(235, 60, 50, 255), text);
-+            }
++            if (v.now)
++                draw->AddRect(a, b, IM_COL32(255, 255, 255, 255), 3.0f, 0, 2.0f);
 +        }
-+        ImGui::Dummy(ImVec2(kLabels + kBlock + 40.0f, kHeight));
++        ImGui::Dummy(ImVec2(kLabels + kBlock + 10.0f, kHeight + 4.0f));
++        if (g_ghsCheats.guestLocation.load() && room >= 0)
++        {
++            char where[128];
++            if (const char *name = ghsRoomName(room))
++                std::snprintf(where, sizeof(where), "in %s", name);
++            else
++                std::snprintf(where, sizeof(where), "in room #%d", room);
++            const ImVec2 at = ImGui::GetCursorScreenPos();
++            draw->AddText(ImVec2(at.x + 1.0f, at.y + 1.0f), shadow, where);
++            ImGui::TextUnformatted(where);
++        }
 +        ImGui::End();
 +    }
 +
@@ -17215,17 +17250,16 @@ index c9aa2c6..0086bb2 100644
 +                }
 +            };
 +            // Warp (zz_ghs_cheats.cpp borrows a door leading into the room; the game's own transition loads it). Rooms are
-+            // numbers: the game has no name table; names get added as they're recognised.
++            // numbers, named by ghsRoomName where known.
 +            if (ImGui::CollapsingHeader("Warp"))
 +            {
-+                static const std::pair<int, const char *> kRoomNames[] = {{1, "Hallway by room 101"}, {50, "Frog's room (save)"}, {53, "Courtyard"}, {72, "Gregory's Horror Shop"}, {104, "Western town"}};
 +                const auto roomName = [](int room)
 +                {
-+                    static char buf[48];
-+                    std::snprintf(buf, sizeof(buf), "Room %d", room);
-+                    for (const auto &[r, n] : kRoomNames)
-+                        if (r == room)
-+                            std::snprintf(buf, sizeof(buf), "Room %d: %s", room, n);
++                    static char buf[80];
++                    if (const char *name = ghsRoomName(room))
++                        std::snprintf(buf, sizeof(buf), "Room %d: %s", room, name);
++                    else
++                        std::snprintf(buf, sizeof(buf), "Room %d", room);
 +                    return buf;
 +                };
 +                ImGui::Text("You are in %s", g_ghsCheats.currentRoom.load() >= 0 ? roomName(g_ghsCheats.currentRoom.load()) : "(not in play)");
@@ -17398,7 +17432,7 @@ index c9aa2c6..0086bb2 100644
  void PS2DebugPanel::initialize()
  {
  #if defined(PS2X_ENABLE_DEBUG_UI) && !defined(PLATFORM_VITA)
-@@ -2183,6 +2826,15 @@ void PS2DebugPanel::initialize()
+@@ -2183,6 +2853,15 @@ void PS2DebugPanel::initialize()
      {
          rlImGuiSetup(true);
          m_initialized = true;
@@ -17414,7 +17448,7 @@ index c9aa2c6..0086bb2 100644
      }
  #endif
  }
-@@ -2198,6 +2850,12 @@ void PS2DebugPanel::shutdown()
+@@ -2198,6 +2877,12 @@ void PS2DebugPanel::shutdown()
  #endif
  }
  
@@ -17427,7 +17461,7 @@ index c9aa2c6..0086bb2 100644
  void PS2DebugPanel::draw(PS2Runtime &runtime)
  {
  #if defined(PS2X_ENABLE_DEBUG_UI) && !defined(PLATFORM_VITA)
-@@ -2211,13 +2869,163 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
+@@ -2211,13 +2896,163 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
          toggleVisible();
      }
  
@@ -17592,7 +17626,7 @@ index c9aa2c6..0086bb2 100644
      ImGui::SetNextWindowSize(ImVec2(780.0f, 620.0f), ImGuiCond_FirstUseEver);
      if (ImGui::Begin("Runtime Debugger", &m_visible, ImGuiWindowFlags_MenuBar))
      {
-@@ -2227,6 +3035,18 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
+@@ -2227,6 +3062,18 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
              ImGui::EndMenuBar();
          }
  
