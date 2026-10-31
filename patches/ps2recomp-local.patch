@@ -2564,10 +2564,10 @@ index 0000000..859f73e
 +file(WRITE "${OUT}" "${out}")
 diff --git a/ps2xRuntime/include/ghs_cheats.h b/ps2xRuntime/include/ghs_cheats.h
 new file mode 100644
-index 0000000..e3a0f23
+index 0000000..e828089
 --- /dev/null
 +++ b/ps2xRuntime/include/ghs_cheats.h
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,69 @@
 +// GHS: cheats (F5, ps2_debug_panel.cpp). The game-specific side (overrides\zz_ghs_cheats.cpp, in the runner) reads
 +// these once a frame on the game thread and changes EE RAM.
 +#pragma once
@@ -2600,9 +2600,11 @@ index 0000000..e3a0f23
 +    std::atomic<bool> invulnerable{false};     // guests' catches don't start
 +    std::atomic<bool> noDetection{false};      // hunting guests don't see or hear the player (and so neither catch him)
 +    std::atomic<float> timeScale{1.0f};        // in-game clock speed (only the clock, not the game)
++    std::atomic<bool> clockLock{false};        // the in-game clock follows the PC's time of day (timeScale unused)
 +    std::atomic<int> giveItem{-1};             // an item id to add once (0-129 items, 130 and up key items); -1 none
 +    std::atomic<int> removeItem{-1};           // an item id to take one of away once; -1 none
 +    std::atomic<bool> speedUp{false};          // the Speed Up item's effect never runs out
++    std::atomic<float> speedUpScale{1.5f};     // how fast Speed Up makes the player (the game's own is 1.5x)
 +    std::atomic<bool> noConditions{false};     // the six conditions (tiredness ... darkness) are cured at once
 +    // Item randomizer (F5 submenu; classes kept in ghs_randomizer.ini): Roll shuffles the item placements of the ticked
 +    // classes once (the game side takes randomizerRoll's seed). Class bits: see itemClass in zz_ghs_cheats.cpp.
@@ -16730,7 +16732,7 @@ index a8f9fa8..f114e1c 100644
  
  
 diff --git a/ps2xRuntime/src/lib/ps2_debug_panel.cpp b/ps2xRuntime/src/lib/ps2_debug_panel.cpp
-index c9aa2c6..5387c3e 100644
+index c9aa2c6..0b57c14 100644
 --- a/ps2xRuntime/src/lib/ps2_debug_panel.cpp
 +++ b/ps2xRuntime/src/lib/ps2_debug_panel.cpp
 @@ -9,6 +9,8 @@
@@ -16760,7 +16762,7 @@ index c9aa2c6..5387c3e 100644
  #include <string>
  #include <vector>
  
-@@ -2176,6 +2181,671 @@ namespace
+@@ -2176,6 +2181,681 @@ namespace
  
  #endif
  }
@@ -17192,14 +17194,24 @@ index c9aa2c6..5387c3e 100644
 +                ImGui::Unindent();
 +            }
 +            check("Permanent Speed Up (run fast)", g_ghsCheats.speedUp);
++            float speedUp = g_ghsCheats.speedUpScale.load();
++            if (ImGui::SliderFloat("Speed Up strength", &speedUp, 1.5f, 4.0f, "%.2fx"))
++                g_ghsCheats.speedUpScale = speedUp;
++            ImGui::SameLine();
++            if (ImGui::SmallButton("1.5x"))
++                g_ghsCheats.speedUpScale = 1.5f;
 +            check("No conditions (tiredness, headache, ... cured at once)", g_ghsCheats.noConditions);
++            check("Lock the clock to the PC's time", g_ghsCheats.clockLock);
++            ImGui::BeginDisabled(g_ghsCheats.clockLock.load());
 +            float scale = g_ghsCheats.timeScale.load();
 +            if (ImGui::SliderFloat("Time speed", &scale, 0.25f, 10.0f, "%.2fx", ImGuiSliderFlags_Logarithmic))
 +                g_ghsCheats.timeScale = scale;
 +            ImGui::SameLine();
 +            if (ImGui::SmallButton("1x"))
 +                g_ghsCheats.timeScale = 1.0f;
-+            ImGui::TextDisabled("The in-game clock only, not the game speed.");
++            ImGui::EndDisabled();
++            ImGui::TextDisabled("The in-game clock only, not the game speed. Locked, it fast-forwards to the PC's time,\n"
++                                "or waits when it is up to 3 hours ahead.");
 +            // Roulette Boy's board game: where the wheel lands (zz_ghs_cheats.cpp sets the angle at the stop).
 +            const auto spinRow = [](const char *label, std::atomic<int> &value)
 +            {
@@ -17432,7 +17444,7 @@ index c9aa2c6..5387c3e 100644
  void PS2DebugPanel::initialize()
  {
  #if defined(PS2X_ENABLE_DEBUG_UI) && !defined(PLATFORM_VITA)
-@@ -2183,6 +2853,15 @@ void PS2DebugPanel::initialize()
+@@ -2183,6 +2863,15 @@ void PS2DebugPanel::initialize()
      {
          rlImGuiSetup(true);
          m_initialized = true;
@@ -17448,7 +17460,7 @@ index c9aa2c6..5387c3e 100644
      }
  #endif
  }
-@@ -2198,6 +2877,12 @@ void PS2DebugPanel::shutdown()
+@@ -2198,6 +2887,12 @@ void PS2DebugPanel::shutdown()
  #endif
  }
  
@@ -17461,7 +17473,7 @@ index c9aa2c6..5387c3e 100644
  void PS2DebugPanel::draw(PS2Runtime &runtime)
  {
  #if defined(PS2X_ENABLE_DEBUG_UI) && !defined(PLATFORM_VITA)
-@@ -2211,13 +2896,163 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
+@@ -2211,13 +2906,163 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
          toggleVisible();
      }
  
@@ -17626,7 +17638,7 @@ index c9aa2c6..5387c3e 100644
      ImGui::SetNextWindowSize(ImVec2(780.0f, 620.0f), ImGuiCond_FirstUseEver);
      if (ImGui::Begin("Runtime Debugger", &m_visible, ImGuiWindowFlags_MenuBar))
      {
-@@ -2227,6 +3062,18 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
+@@ -2227,6 +3072,18 @@ void PS2DebugPanel::draw(PS2Runtime &runtime)
              ImGui::EndMenuBar();
          }
  

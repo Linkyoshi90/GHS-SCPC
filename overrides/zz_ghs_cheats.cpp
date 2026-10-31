@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <array>
 #include <map>
 #include <random>
@@ -507,6 +508,31 @@ namespace ghs_cheats
             std::memset(rdram + kConditions, 0, kConditionCount);
     }
 
+    // Speed Up strength (found 2026-10-31 in the callers): the movement code multiplies its speed by an immediate 1.5 when
+    // FUN_1A5040 returns 1; the speed is already in a callee-saved FPU register then, so it's scaled by want / 1.5
+    // first. The other 5 callers don't scale a speed.
+    PS2Runtime::RecompiledFunction g_speedUpCheck = nullptr;
+    void speedUpCheck(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t ra = getRegU32(ctx, 31);
+        g_speedUpCheck(rdram, ctx, runtime);
+        const float want = g_ghsCheats.speedUpScale.load(std::memory_order_relaxed);
+        if (want == 1.5f || static_cast<int32_t>(getRegU32(ctx, 2)) != 1)
+            return;
+        switch (ra)
+        {
+        case 0x0014D8B8u:
+            ctx->f[22] *= want / 1.5f;
+            break;
+        case 0x0014FC0Cu: case 0x001501ECu: case 0x00150AACu:
+            ctx->f[20] *= want / 1.5f;
+            break;
+        case 0x0014FE74u: case 0x0015032Cu: case 0x0015061Cu: case 0x00151090u:
+            ctx->f[21] *= want / 1.5f;
+            break;
+        }
+    }
+
     // Key items whose scenes need the guest to see and chase the player: while one is equipped (int16 0x450710),
     // invulnerability and no detection step aside. Screwdriver: used on Clock Master, he chases you (user, 2026-10-24);
     // Dice: Roulette Boy (user, 2026-10-25). Holding one in the pocket isn't enough: with "held" the cheats were off for
@@ -654,6 +680,29 @@ namespace ghs_cheats
         g_vsync(rdram, ctx, runtime);
     }
 
+    // Clock lock: the frame tick's step is what brings the clock to the PC's time of day (0x5E9934 counts 1/60 s from
+    // midnight, FUN_1D8DF0 rolls it over at 0x4F1A00 = 24 h and counts the day). A gap is fast-forwarded through the
+    // game's own step, kCatchUp a frame; a clock up to kWait ahead of the PC (story time jumps) waits instead of going
+    // back (a step back would go back a day).
+    constexpr int32_t kDay = 0x4F1A00, kHour = 216000, kCatchUp = 1800, kWait = 3 * kHour; // kCatchUp: 1 game minute
+    int32_t lockedStep(const uint8_t *rdram)
+    {
+        const auto now = std::chrono::system_clock::now();
+        const std::time_t t = std::chrono::system_clock::to_time_t(now);
+        std::tm local{};
+#ifdef _WIN32
+        localtime_s(&local, &t);
+#else
+        localtime_r(&t, &local);
+#endif
+        const int32_t ms = static_cast<int32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000);
+        const int32_t pc = ((local.tm_hour * 60 + local.tm_min) * 60 + std::min(local.tm_sec, 59)) * 60 + ms * 60 / 1000;
+        int32_t clock;
+        std::memcpy(&clock, rdram + kClock, 4);
+        const int32_t behind = ((pc - clock) % kDay + kDay) % kDay;
+        return kDay - behind <= kWait ? 0 : std::min(behind, kCatchUp);
+    }
+
     // Time speed: the frame tick's step scaled, the remainder carried (x0.25 = every 4th frame's step).
     PS2Runtime::RecompiledFunction g_clockStep = nullptr;
     double g_carry = 0.0;
@@ -661,7 +710,10 @@ namespace ghs_cheats
     {
         const uint32_t ra = getRegU32(ctx, 31);
         const float scale = g_ghsCheats.timeScale.load(std::memory_order_relaxed);
-        if (ra >= 0x001D8930u && ra < 0x001D8AF4u && scale != 1.0f) // from the frame tick only (not time jumps)
+        const bool tick = ra >= 0x001D8930u && ra < 0x001D8AF4u; // from the frame tick only (not time jumps)
+        if (tick && g_ghsCheats.clockLock.load(std::memory_order_relaxed))
+            SET_GPR_U32(ctx, 4, static_cast<uint32_t>(lockedStep(rdram)));
+        else if (tick && scale != 1.0f)
         {
             const double step = static_cast<int32_t>(getRegU32(ctx, 4)) * static_cast<double>(scale) + g_carry;
             const double whole = std::floor(step);
@@ -852,8 +904,9 @@ namespace ghs_cheats
         std::fprintf(stderr, "[GHS-CHEAT] roulette: %s spin set to %d\n", opponent != 0u ? "opponent's" : "your", want);
     }
 
-    // GHS-TRACE: GHS_CHEATFILE=<path>: lines "health 0|1", "items 0|1", "keyitems 0|1", "time <x>", "give <id>" set the
-    // F5 state when the file appears; the file is then deleted (tests without clicking the window).
+    // GHS-TRACE: GHS_CHEATFILE=<path>: lines "health 0|1", "items 0|1", "keyitems 0|1", "time <x>", "clocklock 0|1",
+    // "speedupx <x>", "give <id>" set the F5 state when the file appears; the file is then deleted (tests without
+    // clicking the window).
     void cheatFileThread(std::string path)
     {
         for (;;)
@@ -899,6 +952,10 @@ namespace ghs_cheats
                     g_ghsCheats.radar = value != 0.0f;
                 else if (w == "time")
                     g_ghsCheats.timeScale = value;
+                else if (w == "clocklock")
+                    g_ghsCheats.clockLock = value != 0.0f;
+                else if (w == "speedupx")
+                    g_ghsCheats.speedUpScale = value;
                 else if (w == "warp")
                     g_ghsCheats.warpTo = static_cast<int>(value);
                 else if (w == "give")
@@ -934,6 +991,8 @@ namespace ghs_cheats
         g_clockStep = runtime.lookupFunction(0x001D8DF0u);
         if (g_clockStep)
             runtime.replaceFunction(0x001D8DF0u, &clockStep);
+        if ((g_speedUpCheck = runtime.lookupFunction(0x001A5040u)))
+            runtime.replaceFunction(0x001A5040u, &speedUpCheck);
         if ((g_guestCatch = runtime.lookupFunction(0x001C1010u)))
             runtime.replaceFunction(0x001C1010u, &guestCatch);
         if ((g_encounter = runtime.lookupFunction(0x00217970u)))
