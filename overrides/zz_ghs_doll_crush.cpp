@@ -97,13 +97,14 @@ namespace ghs_doll_crush
             g_wrote[e] = rdram[e + 4u] = static_cast<uint8_t>(here);
     }
 
-    // Her soul: records 0x64E2E0 + slot * 0x90, int16 state at +6; FUN_245880 sets 14 when the player takes it, FUN_247A50
-    // 15 when Death gets it. Until then she keeps the game's own behaviour (her soul quest needs it).
+    // Her soul: records 0x64E2E0 + slot * 0x90, int16 state at +6; FUN_245700 sets 12 when the player picks up her soul jar
+    // (F6 snapshots 2026-11-04: 6 -> 12), FUN_245880 14, FUN_247A50 14 -> 15 when Death gets it. Until then she keeps the
+    // game's own behaviour (her soul quest needs it).
     constexpr uint32_t kSoulState = 0x0064E2E6u + kDoll * 0x90u;
     bool soulTaken(const uint8_t *rdram)
     {
         const int16_t s = rd<int16_t>(rdram, kSoulState);
-        return s == 14 || s == 15;
+        return s == 12 || s == 14 || s == 15;
     }
 
     uint32_t g_frame = 0, g_scene = 0; // the frame the scene below began (0: none); following waits while it runs
