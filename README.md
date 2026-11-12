@@ -198,7 +198,8 @@ on, in name order (a later mod wins); without mods it puts the original back. In
   needs. After that she follows you from room to room, except to her own rooms. Until she's angry she's too shy to
   catch you: when she spots or touches you in the room you're in (your guest room too), she flees instead. Leaving a
   room she's in with you counts as rejecting her, and a minute together forgives one rejection. After three she gets angry and hunts you until she
-  catches you. The code is `overrides\zz_ghs_doll_crush.cpp`. The following is off while the guest shuffle is on. The
+  catches you. If she catches you with the Doll equipped, her horror show starts by asking "Did you bring that doll for
+  me?". Then she hugs you and takes the Doll, and you're back in the hotel without damage. The code is `overrides\zz_ghs_doll_crush.cpp`. The following is off while the guest shuffle is on. The
   first-sight scene and her mood reset when the game starts.
 
 ## Where things are

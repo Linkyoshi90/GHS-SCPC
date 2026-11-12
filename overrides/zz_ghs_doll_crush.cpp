@@ -10,6 +10,7 @@
 #include "ps2_runtime.h"
 #include "ghs_cheats.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -217,11 +218,13 @@ namespace ghs_doll_crush
     PS2Runtime::RecompiledFunction g_vsync = nullptr, g_sees = nullptr, g_encounter = nullptr, g_huntAi = nullptr, g_line = nullptr,
                                    g_guests = nullptr;
     void returnToCaller(R5900Context *ctx) { ctx->pc = getRegU32(ctx, 31); }
+    void noNewConditions(uint8_t *rdram); // the Doll's show, below
     void vsync(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         ++g_frame;
         scene(rdram);
         watch(rdram);
+        noNewConditions(rdram);
         g_vsync(rdram, ctx, runtime);
     }
     void huntAi(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -356,6 +359,121 @@ namespace ghs_doll_crush
         g_encounter(rdram, ctx, runtime);
     }
 
+    // The Doll (user 2026-11-04): caught with the Doll (key item 134) equipped, her horror show starts with "Did you bring
+    // that doll for me?", she hugs the player, takes the Doll and the show ends without its mental damage. No Yes / No:
+    // Neko's button wait (0xD1 / 0xDF) hung the show on the first line (play-test 2026-11-04). Her show is event script 0x6F (found 2026-11-04): FUN_24FA00(id) loads a script from the table at
+    // 0x334910 (pointer, flags) into 0x64FDD8 (id) / 0x64FDDC (pointer); the VM runs it from its current label each
+    // frame. Instructions: u16 0xC000 | op << 4 | n, then n int16 arguments; 0x2 L label, 0x3 L goto, 0x7 / 0x8 v k L
+    // if var[v] == / != k goto L, 0x0 the end (label searches stop there). Script 0x6F (0x414A60-0x414EC4): L400 fades in
+    // and goes to L500, her first line; its only damage is 0x70 (L620, L20500 when skipped); L10500 ends it without.
+    // The hook gives the VM a copy at kScript with L400 going to a new L450, the new labels in front of the last one
+    // (L32767). Commands: 0xCE w pool id text, 0xDB w 0 0 after it, 0xDC / 0xDE w close; 0x142 v id var[v] = item
+    // equipped, 0xEE id takes the item, 0x40 actor x y z a position (-10000 keeps y), 0x4E actor anim mode 0, 0xE / 0xF
+    // t c timer reset / wait c / 100 s. Her two new lines (pool 4, kAsk / kThanks) come from the text lookup
+    // FUN_2D8D90(pool, id, 0), which returns a pointer to the text.
+    constexpr uint32_t kShow = 0x00414A60u, kShowGoto500 = 0x00414B1Au, kShowLast = 0x00414EBEu, kShowEnd = 0x00414EC4u;
+    constexpr uint32_t kScriptId = 0x0064FDD8u, kScriptPtr = 0x0064FDDCu, kEquipped = 0x00450710u;
+    constexpr uint32_t kScript = 0x000FE000u, kTexts = 0x000FF800u; // free RAM below the program (zero in all snapshots)
+    constexpr int16_t kDollItem = 134, kAsk = 9001, kThanks = 9002;
+    // Her pool's line header (as in 033.slid\004.bin), then the text.
+    const char kAskText[] = "\x1c" "B\x1c" "J\x1c" ":\x1a" "6\x1c" "1\x1c" "K\n Hee hee...\n Did you bring that doll...\n for me...?";
+    const char kThanksText[] = "\x1c" "B\x1c" "J\x1c" ":\x1a" "6\x1c" "1\x1c" "K\n My dolly...! Hee hee hee!\n Thank you...my darling...";
+    // The show still gave a headache without its 0x70 (play-test 2026-11-04), so the C side of the catch sets it: the
+    // conditions (bytes 0x4505D8-0x4505DE, 1 = has it, as in the cheats) the player didn't have at the show's start are
+    // cleared each frame for a while. ponytail: a fixed 2 minutes, not the show's end; find the setter if that's too long.
+    constexpr uint32_t kConditions = 0x004505D8u, kNoConditions = 2u * 60u * 60u;
+    uint8_t g_hadCondition[7] = {};
+    uint32_t g_noConditionsUntil = 0;
+    void noNewConditions(uint8_t *rdram)
+    {
+        if (!g_noConditionsUntil)
+            return;
+        for (uint32_t i = 0; i < sizeof(g_hadCondition); ++i)
+            if (!g_hadCondition[i])
+                rdram[kConditions + i] = 0u;
+        if (static_cast<int32_t>(g_frame - g_noConditionsUntil) >= 0)
+            g_noConditionsUntil = 0;
+    }
+    std::vector<uint8_t> g_code;
+    void op(int code, std::initializer_list<int16_t> args)
+    {
+        const uint16_t h = static_cast<uint16_t>(0xC000u | static_cast<uint32_t>(code) << 4 | args.size());
+        g_code.insert(g_code.end(), {static_cast<uint8_t>(h), static_cast<uint8_t>(h >> 8)});
+        for (const int16_t a : args)
+            g_code.insert(g_code.end(), {static_cast<uint8_t>(a), static_cast<uint8_t>(static_cast<uint16_t>(a) >> 8)});
+    }
+    bool writeDollShow(uint8_t *rdram)
+    {
+        if (rd<uint16_t>(rdram, kShowGoto500 - 2u) != 0xC031u || rd<int16_t>(rdram, kShowGoto500) != 500 ||
+            rd<uint16_t>(rdram, kShowLast) != 0xC021u || rd<int16_t>(rdram, kShowLast + 2u) != 32767)
+            return false; // not the script as found
+        g_code.assign(rdram + kShow, rdram + kShowLast);
+        g_code[kShowGoto500 - kShow] = 450 & 0xFF;
+        g_code[kShowGoto500 - kShow + 1u] = 450 >> 8;
+        op(0x2, {450}), op(0x142, {13, kDollItem}), op(0x7, {13, 1, 5000}), op(0x3, {500});
+        // Lines as her show runs its own (L500): window 1, closed by a timer, no button wait.
+        op(0x2, {5000}), op(0x21, {}), op(0xCE, {1, 4, kAsk}), op(0xDB, {1, 0, 0}), op(0xE, {0, 0}), op(0x3, {5010});
+        op(0x2, {5010}), op(0xF, {0, 600}), op(0xDC, {1}), op(0x3, {5020});
+        op(0x2, {5020}), op(0xDE, {1}), op(0x3, {5100});
+        // Moving her (0x40 4 -130 ...) made her vanish (play-test 2026-11-04): she stays where the show put her.
+        op(0x2, {5100}), op(0x4E, {4, 24, 1, 0}), op(0xCE, {1, 4, kThanks}), op(0xDB, {1, 0, 0});
+        op(0xEE, {kDollItem}), op(0xE, {0, 0}), op(0x3, {5110});
+        op(0x2, {5110}), op(0xF, {0, 600}), op(0xDC, {1}), op(0x3, {5120});
+        op(0x2, {5120}), op(0xDE, {1}), op(0x3, {10500});
+        g_code.insert(g_code.end(), rdram + kShowLast, rdram + kShowEnd);
+        std::vector<int16_t> labels, targets; // self-check: the copy parses to its end and every goto has its label
+        size_t at = 0;
+        for (uint16_t h = 1; h != 0xC000u && at + 2u <= g_code.size();)
+        {
+            std::memcpy(&h, &g_code[at], 2);
+            const uint32_t code = (h & 0x1FF0u) >> 4, n = h & 0xFu;
+            std::vector<int16_t> args(n);
+            if (n && at + 2u + 2u * n <= g_code.size())
+                std::memcpy(args.data(), &g_code[at + 2u], 2u * n);
+            at += 2u + 2u * n;
+            if (code == 0x2u && n == 1u)
+                labels.push_back(args[0]);
+            else if ((code == 0x3u && n == 1u) || ((code == 0x7u || code == 0x8u) && n == 3u))
+                targets.push_back(args[n - 1u]);
+        }
+        for (const int16_t t : targets)
+            if (std::find(labels.begin(), labels.end(), t) == labels.end())
+                return false;
+        if (at != g_code.size())
+            return false;
+        static_assert(sizeof(kAskText) < 0x80 && sizeof(kThanksText) < 0x80);
+        if (g_code.size() > kTexts - kScript)
+            return false;
+        std::memcpy(rdram + kScript, g_code.data(), g_code.size());
+        std::memset(rdram + kTexts, 0, 0x100);
+        std::memcpy(rdram + kTexts, kAskText, sizeof(kAskText));
+        std::memcpy(rdram + kTexts + 0x80u, kThanksText, sizeof(kThanksText));
+        return true;
+    }
+    PS2Runtime::RecompiledFunction g_loadScript = nullptr, g_text = nullptr;
+    void loadScript(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        g_loadScript(rdram, ctx, runtime);
+        if (rd<uint32_t>(rdram, kScriptId) != 0x6Fu || rd<uint32_t>(rdram, kScriptPtr) != kShow)
+            return;
+        if (!writeDollShow(rdram))
+            return (void)std::fprintf(stderr, "[GHS-CRUSH] Lost Doll's horror show isn't the script as found: no Doll question\n");
+        std::memcpy(rdram + kScriptPtr, &kScript, 4);
+        if (rd<int16_t>(rdram, kEquipped) != kDollItem)
+            return;
+        std::memcpy(g_hadCondition, rdram + kConditions, sizeof(g_hadCondition));
+        g_noConditionsUntil = g_frame + kNoConditions;
+        std::fprintf(stderr, "[GHS-CRUSH] Lost Doll's horror show: the Doll is equipped, she asks for it\n");
+    }
+    void text(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t id = getRegU32(ctx, 5);
+        if (getRegU32(ctx, 4) != 4u || getRegU32(ctx, 6) != 0u || (id != static_cast<uint32_t>(kAsk) && id != static_cast<uint32_t>(kThanks)))
+            return g_text(rdram, ctx, runtime);
+        SET_GPR_U32(ctx, 2, kTexts + (id == static_cast<uint32_t>(kAsk) ? 0u : 0x80u));
+        returnToCaller(ctx);
+    }
+
     void apply(PS2Runtime &runtime)
     {
         std::ifstream built("FILE.STM.mods"); // the working directory is game\ (written by tools\ghsmod.py)
@@ -376,6 +494,10 @@ namespace ghs_doll_crush
             runtime.replaceFunction(0x00223950u, &line);
         if ((g_guests = runtime.lookupFunction(0x00140730u)))
             runtime.replaceFunction(0x00140730u, &guests);
+        if ((g_loadScript = runtime.lookupFunction(0x0024FA00u)))
+            runtime.replaceFunction(0x0024FA00u, &loadScript);
+        if ((g_text = runtime.lookupFunction(0x002D8D90u)))
+            runtime.replaceFunction(0x002D8D90u, &text);
         std::fprintf(stderr, "[GHS-CRUSH] on: Lost Doll has a crush on the player\n");
     }
 
